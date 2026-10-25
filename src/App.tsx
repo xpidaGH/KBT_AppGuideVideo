@@ -74,6 +74,10 @@ export default function App() {
         window.dispatchEvent(
           new CustomEvent('kbt-hotkey', { detail: { action: 'PREVIEW_TTS' } })
         );
+      } else if (e.key === 'f' || e.key === 'F') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'CYCLE_FILTER' } })
+        );
       }
     };
 

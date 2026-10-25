@@ -30,6 +30,8 @@ import {
   Share2,
   Keyboard,
   X,
+  Palette,
+  SlidersHorizontal,
 } from 'lucide-react';
 import {
   SupportedLanguageCode,
@@ -37,6 +39,7 @@ import {
   ScribeWorkflowStep,
   AnnotationMode,
   VideoExportOptions,
+  ColorFilterId,
 } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
 import { INITIAL_SOFTSUB_CUES, INITIAL_SCRIBE_STEPS } from '../data/annotationsData';
@@ -55,7 +58,10 @@ import {
   VIDEO_QUALITY_OPTIONS,
   FRAMERATE_OPTIONS,
   KEYBOARD_SHORTCUTS,
+  COLOR_FILTER_PRESETS,
+  COLOR_FILTER_MAP,
 } from '../data/recorderConfig';
+import { applyLutToImageData } from '../utils/colorFilterPipeline';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -126,6 +132,23 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const setShowClockOverlay = setShowTimerOverlay;
   const [showShortcutsOverlay, setShowShortcutsOverlay] = useState<boolean>(true);
 
+  // Real-time Canvas-based Video Filter & Color-Correction LUT Pipeline
+  const [selectedFilter, setSelectedFilter] = useState<ColorFilterId>(
+    DEFAULT_STUDIO_CONFIG.defaultFilter
+  );
+  const [usePixelLutEngine, setUsePixelLutEngine] = useState<boolean>(false);
+  const [showFilterMenu, setShowFilterMenu] = useState<boolean>(false);
+  const screenVideoRef = useRef<HTMLVideoElement | null>(null);
+  const activeFilter = COLOR_FILTER_MAP[selectedFilter] || COLOR_FILTER_MAP.none;
+
+  const handleCycleFilter = () => {
+    setSelectedFilter((prev) => {
+      const idx = COLOR_FILTER_PRESETS.findIndex((p) => p.id === prev);
+      const nextIdx = (idx + 1) % COLOR_FILTER_PRESETS.length;
+      return COLOR_FILTER_PRESETS[nextIdx].id;
+    });
+  };
+
   // Export settings
   const [exportQuality, setExportQuality] = useState<'1080p' | '720p'>(
     DEFAULT_STUDIO_CONFIG.defaultQuality
@@ -153,17 +176,173 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     return () => clearInterval(interval);
   }, [isRecording, isPaused, setRecordingSeconds]);
 
-  // Real-time canvas animation loop (Ripples, Cursor Halo, Softsub Subtitles)
+  // Real-time canvas animation loop (Compositing Video/IDE base, Color Filter LUT, Ripples, Cursor Halo, Softsubs, Timer Overlay)
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
 
     const render = () => {
       // Clear canvas overlay
       ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // 0. Base Video / Software Workstation Compositor Layer with Real-Time Color Filter LUT Pipeline
+      ctx.save();
+      if (activeFilter.id !== 'none') {
+        ctx.filter = activeFilter.canvasFilter;
+      }
+
+      if (captureSource === 'screen' && screenVideoRef.current && screenVideoRef.current.readyState >= 2) {
+        ctx.drawImage(screenVideoRef.current, 0, 0, canvas.width, canvas.height);
+      } else if (captureSource === 'simulator') {
+        // Render rich simulated IDE workstation directly to compositor canvas
+        const bgGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+        bgGrad.addColorStop(0, '#09090b');
+        bgGrad.addColorStop(0.5, '#121217');
+        bgGrad.addColorStop(1, '#09090b');
+        ctx.fillStyle = bgGrad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Window Frame
+        const pad = 24;
+        const winW = canvas.width - pad * 2;
+        const winH = canvas.height - pad * 2;
+
+        ctx.fillStyle = '#0e0f14';
+        ctx.roundRect(pad, pad, winW, winH, 12);
+        ctx.fill();
+        ctx.strokeStyle = '#27272a';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        // Header bar
+        ctx.fillStyle = '#18181b';
+        ctx.roundRect(pad, pad, winW, 40, [12, 12, 0, 0]);
+        ctx.fill();
+
+        // Window buttons
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(pad + 20, pad + 20, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#f59e0b';
+        ctx.beginPath();
+        ctx.arc(pad + 38, pad + 20, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath();
+        ctx.arc(pad + 56, pad + 20, 5.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Title
+        ctx.font = '600 13px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#a1a1aa';
+        ctx.fillText('KBT CloudIDE Simulator — Multi-Language Architecture Engine', pad + 78, pad + 25);
+
+        // Active LUT banner in header
+        if (activeFilter.id !== 'none') {
+          ctx.font = '700 11px "JetBrains Mono", monospace';
+          ctx.fillStyle = '#c084fc';
+          ctx.textAlign = 'right';
+          ctx.fillText(`LUT: [${activeFilter.name.toUpperCase()}]`, pad + winW - 20, pad + 25);
+          ctx.textAlign = 'left';
+        }
+
+        // Sidebar
+        ctx.fillStyle = '#121318';
+        ctx.fillRect(pad + 1, pad + 41, 200, winH - 42);
+        ctx.strokeStyle = '#27272a';
+        ctx.beginPath();
+        ctx.moveTo(pad + 201, pad + 41);
+        ctx.lineTo(pad + 201, pad + winH);
+        ctx.stroke();
+
+        ctx.font = '600 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#71717a';
+        ctx.fillText('EXPLORER : KBT PROJECT', pad + 16, pad + 65);
+
+        const files = [
+          '📄 main.cpp [AVX2]',
+          '📄 SIMD_Kernel.rs',
+          '📄 pipeline.go',
+          '📄 engine.cu [CUDA]',
+          '📄 config.toml',
+        ];
+        files.forEach((f, fi) => {
+          ctx.fillStyle = fi === 0 ? '#818cf8' : '#a1a1aa';
+          ctx.fillText(f, pad + 20, pad + 95 + fi * 26);
+        });
+
+        // Editor code area
+        ctx.fillStyle = '#0d0e12';
+        ctx.fillRect(pad + 202, pad + 41, winW - 203, winH - 180);
+
+        const codeSnippets = [
+          '// High-Performance Architectural Engine SIMD Kernel',
+          '#include <immintrin.h>',
+          '#include <stdint.h>',
+          '',
+          'void process_vector_stream(const float* in, float* out, size_t n) {',
+          '    const __m256 kPivot = _mm256_set1_ps(1.0f);',
+          '    for (size_t i = 0; i < n; i += 8) {',
+          '        __m256 v = _mm256_loadu_ps(in + i);',
+          '        __m256 res = _mm256_fmadd_ps(v, v, kPivot);',
+          '        _mm256_storeu_ps(out + i, res);',
+          '    }',
+          '}',
+        ];
+        ctx.font = '12px "JetBrains Mono", monospace';
+        codeSnippets.forEach((line, li) => {
+          ctx.fillStyle = '#52525b';
+          ctx.fillText(String(li + 1).padStart(2, '0'), pad + 218, pad + 72 + li * 22);
+          ctx.fillStyle =
+            line.startsWith('//')
+              ? '#71717a'
+              : line.startsWith('#')
+              ? '#f43f5e'
+              : line.includes('void') || line.includes('const')
+              ? '#60a5fa'
+              : line.includes('_mm256')
+              ? '#34d399'
+              : '#e4e4e7';
+          ctx.fillText(line, pad + 250, pad + 72 + li * 22);
+        });
+
+        // Terminal pane
+        ctx.fillStyle = '#090a0f';
+        ctx.fillRect(pad + 202, pad + winH - 140, winW - 203, 138);
+        ctx.strokeStyle = '#27272a';
+        ctx.beginPath();
+        ctx.moveTo(pad + 202, pad + winH - 140);
+        ctx.lineTo(pad + winW, pad + winH - 140);
+        ctx.stroke();
+
+        ctx.font = '600 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillText('TERMINAL : KBT COMPILER & RUNTIME v2.4 [60 FPS COMPOSITOR]', pad + 218, pad + winH - 118);
+
+        ctx.font = '11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#4ade80';
+        ctx.fillText('[OK] Real-time Canvas Capture Stream Initialized.', pad + 218, pad + winH - 96);
+        ctx.fillStyle = '#e4e4e7';
+        ctx.fillText(`[LUT] Active Color-Correction Filter: ${activeFilter.name}`, pad + 218, pad + winH - 74);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(`[STATUS] ${isRecording ? (isPaused ? 'PAUSED' : 'ENCODING TO STREAM...') : 'STANDBY READY'} | Cycle with 'F'`, pad + 218, pad + winH - 52);
+      }
+      ctx.restore();
+
+      // Pure Pixel LUT transformation if algorithmic mode is enabled
+      if (usePixelLutEngine && activeFilter.id !== 'none') {
+        try {
+          const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          applyLutToImageData(imgData, activeFilter.id);
+          ctx.putImageData(imgData, 0, 0);
+        } catch {
+          // Fallback safely if tainted
+        }
+      }
 
       // 1. Draw ripples
       ripplesRef.current.forEach((r) => {
@@ -320,6 +499,46 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         ctx.restore();
       }
 
+      // 5. Active Color Filter / LUT Status Overlay Badge
+      if (activeFilter.id !== 'none') {
+        ctx.save();
+        const badgeW = 160;
+        const badgeH = 34;
+        const badgeX = canvas.width - badgeW - 24;
+        const badgeY = 24;
+
+        ctx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+        ctx.strokeStyle = 'rgba(168, 85, 247, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        // Swatch dot
+        ctx.beginPath();
+        ctx.arc(badgeX + 16, badgeY + badgeH / 2, 5, 0, Math.PI * 2);
+        ctx.fillStyle =
+          activeFilter.id === 'grayscale'
+            ? '#cbd5e1'
+            : activeFilter.id === 'sepia'
+            ? '#d97706'
+            : activeFilter.id === 'high-contrast'
+            ? '#f43f5e'
+            : activeFilter.id === 'warm-sunlight'
+            ? '#f97316'
+            : activeFilter.id === 'cyberpunk-cool'
+            ? '#06b6d4'
+            : '#a855f7';
+        ctx.fill();
+
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`LUT: ${activeFilter.label.toUpperCase()}`, badgeX + 28, badgeY + badgeH / 2);
+        ctx.restore();
+      }
+
       animId = requestAnimationFrame(render);
     };
 
@@ -335,6 +554,10 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     annotationMode,
     showTimerOverlay,
     exportFramerate,
+    selectedFilter,
+    activeFilter,
+    usePixelLutEngine,
+    captureSource,
   ]);
 
   // Initialize Camera stream if enabled
@@ -654,6 +877,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         setIsMicActive((prev) => !prev);
       } else if (action === 'PREVIEW_TTS') {
         handlePreviewTts();
+      } else if (action === 'CYCLE_FILTER') {
+        handleCycleFilter();
       }
     };
 
@@ -762,9 +987,96 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             <Keyboard className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden sm:inline font-medium">Shortcuts</span>
             <span className="hidden xl:inline text-[10px] px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-zinc-400">
-              Space / T
+              Space / T / F
             </span>
           </button>
+
+          {/* Real-time Video Filter / Color-Correction LUT Pipeline Selector */}
+          <div className="relative">
+            <button
+              type="button"
+              id="color-filter-lut-dropdown-btn"
+              onClick={() => setShowFilterMenu((prev) => !prev)}
+              title="Apply real-time color-correction LUT to video stream before encoding (Press 'F' to cycle)"
+              className={`lut-selector-btn px-3 py-1.5 rounded-xl border text-xs flex items-center gap-2 transition cursor-pointer select-none ${
+                activeFilter.id !== 'none'
+                  ? 'bg-purple-950/50 text-purple-200 border-purple-600/70 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200 hover:border-zinc-700'
+              }`}
+            >
+              <Palette className="w-3.5 h-3.5 text-purple-400" />
+              <span className="font-semibold">LUT: {activeFilter.label}</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  activeFilter.id !== 'none' ? 'bg-purple-400 animate-pulse' : 'bg-zinc-600'
+                }`}
+              />
+            </button>
+
+            {/* Dropdown Menu */}
+            {showFilterMenu && (
+              <div
+                id="color-filter-lut-dropdown-menu"
+                className="absolute top-full left-0 mt-2 z-50 w-72 p-3 rounded-2xl bg-zinc-900/98 backdrop-blur-md border border-zinc-700 shadow-2xl space-y-2.5 animate-in fade-in zoom-in-95 duration-100"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-zinc-800">
+                  <div className="flex items-center gap-1.5">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-purple-400" />
+                    <span className="text-xs font-bold text-zinc-200">Color-Correction LUTs</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-400 font-mono">Hotkey 'F'</span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-1.5 max-h-60 overflow-y-auto pr-0.5">
+                  {COLOR_FILTER_PRESETS.map((preset) => (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedFilter(preset.id);
+                        setShowFilterMenu(false);
+                      }}
+                      className={`filter-preset-btn p-2 rounded-xl text-left border transition flex flex-col gap-1 text-xs cursor-pointer ${
+                        selectedFilter === preset.id
+                          ? 'bg-purple-950/60 border-purple-500 text-white shadow-sm ring-1 ring-purple-500/50'
+                          : 'bg-zinc-950 border-zinc-800 hover:border-zinc-700 text-zinc-300'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-[11px] truncate">{preset.label}</span>
+                        <div
+                          className={`w-2.5 h-2.5 rounded-full bg-gradient-to-br ${preset.previewGradient} shadow-xs shrink-0`}
+                        />
+                      </div>
+                      <span className="text-[9px] text-zinc-400 line-clamp-1">{preset.name}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="pt-2 border-t border-zinc-800 flex items-center justify-between text-[10px] text-zinc-400 font-mono">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={usePixelLutEngine}
+                      onChange={(e) => setUsePixelLutEngine(e.target.checked)}
+                      className="rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-0 w-3 h-3 cursor-pointer"
+                    />
+                    <span>Pixel-level LUT</span>
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedFilter('none');
+                      setShowFilterMenu(false);
+                    }}
+                    className="text-zinc-400 hover:text-white underline cursor-pointer"
+                  >
+                    Reset (Normal)
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Visual Annotations Toggler */}
           <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
@@ -906,11 +1218,40 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         </div>
       </div>
 
+      {/* Quick Color-Correction LUT Preset Strip */}
+      <div className="flex items-center gap-2 overflow-x-auto py-1.5 px-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-xs">
+        <span className="text-[11px] font-mono font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+          <Palette className="w-3.5 h-3.5 text-purple-400" />
+          <span>Color LUT:</span>
+        </span>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          {COLOR_FILTER_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => setSelectedFilter(preset.id)}
+              title={`${preset.name} — ${preset.description}`}
+              className={`lut-filter-preset-pill px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                selectedFilter === preset.id
+                  ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-400 font-semibold'
+                  : 'bg-zinc-950/90 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800/80'
+              }`}
+            >
+              <span className={`w-2 h-2 rounded-full bg-gradient-to-br ${preset.previewGradient}`} />
+              <span>{preset.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
       {/* Main Studio Viewport (Recording Screen + Draggable Webcam + Canvas Overlay) */}
       <div className="relative w-full aspect-video min-h-[480px] bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden shadow-2xl flex flex-col justify-center items-center">
         {/* If using the interactive simulator */}
         {captureSource === 'simulator' ? (
-          <div className="w-full h-full p-2">
+          <div
+            style={{ filter: activeFilter.cssFilter }}
+            className="w-full h-full p-2 transition duration-200"
+          >
             <InteractiveAppSimulator onInteraction={handleSimulatorInteraction} />
           </div>
         ) : (
@@ -921,11 +1262,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                 playsInline
                 muted
                 ref={(vid) => {
+                  screenVideoRef.current = vid;
                   if (vid && displayStreamRef.current) {
                     vid.srcObject = displayStreamRef.current;
                   }
                 }}
-                className="w-full h-full object-contain"
+                style={{ filter: activeFilter.cssFilter }}
+                className="w-full h-full object-contain transition duration-200"
               />
             ) : (
               <div className="text-center p-6 space-y-2">
@@ -976,7 +1319,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         {showShortcutsOverlay ? (
           <div
             id="studio-shortcuts-overlay"
-            className="shortcuts-overlay absolute bottom-4 left-4 z-30 w-64 bg-zinc-950/92 backdrop-blur-md border border-zinc-800/90 rounded-2xl p-3 shadow-2xl text-xs space-y-2 pointer-events-auto transition animate-in fade-in duration-150"
+            className="shortcuts-overlay absolute bottom-4 left-4 z-30 w-68 bg-zinc-950/92 backdrop-blur-md border border-zinc-800/90 rounded-2xl p-3 shadow-2xl text-xs space-y-2 pointer-events-auto transition animate-in fade-in duration-150"
           >
             <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-1.5">
               <div className="flex items-center gap-1.5 text-indigo-300 font-bold tracking-wide">

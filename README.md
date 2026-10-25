@@ -21,9 +21,16 @@ Inspired by **OBS Studio, Camtasia, ScreenFlow, Scribe, Guidde, and Loom**, this
   - **Real-Time Recording Timer Overlay**: Configurable, toggleable recording clock directly composited onto video frames (`DEFAULT_STUDIO_CONFIG`, `TIMER_OVERLAY_STYLE`).
   - Client-side production export to **MP4** and **WebM** containers (1080p 60FPS / 720p 30FPS).
 
+- 🎨 **Real-Time Video Filter & Color-Correction LUT Pipeline**:
+  - Live hardware-accelerated 2D canvas color grading pipeline (`ctx.filter` & pixel-level algorithmic LUT).
+  - Presets: **Normal (Raw)**, **Grayscale (ITU-R BT.709)**, **Sepia (Vintage Warm Film)**, **High Contrast (Punchy Clarity)**, **Warm Sunlight (Golden Hour)**, **Cyberpunk (Teal & Cool Cyan)**, **Bleach Bypass (Cinema Silver)**, and **Invert (Thermal / Night Vision)**.
+  - Active LUT is rendered directly into the composited video stream (`canvas.captureStream()`) so exported MP4 and WebM videos have the chosen color grading baked in.
+  - Interactive top-deck dropdown selector, quick-access preset swatch bar, and real-time canvas watermark HUD badge (`LUT: [PRESET]`).
+
 - ⌨️ **Global Keyboard Listener & Shortcuts HUD**:
   - App-level global keyboard listener (`window.addEventListener('keydown')`) with intelligent form-input bypass.
   - Space key toggle for starting and stopping recording (`e.preventDefault()` prevents unwanted scrolling).
+  - Dedicated hotkey `F` to cycle through color-correction LUT presets in real time.
   - Dedicated hotkey `T` to toggle real-time recording timer overlay on the video canvas.
   - Dedicated hotkey `C` to toggle circular camera bubble.
   - Dedicated hotkey `M` to toggle microphone audio track.
@@ -54,6 +61,7 @@ The application features a root-level global keyboard listener in the `App` comp
 | Key | Action | Description |
 |---|---|---|
 | <kbd>Space</kbd> | `TOGGLE_RECORDING` | Starts or stops the recording session (prevents page scroll) |
+| <kbd>F</kbd> | `CYCLE_FILTER` | Cycles through real-time video color-correction LUT presets |
 | <kbd>T</kbd> | `TOGGLE_TIMER` | Toggles the real-time recording timer/clock overlay on canvas |
 | <kbd>C</kbd> | `TOGGLE_CAM` | Toggles the circular Loom-style camera bubble on/off |
 | <kbd>M</kbd> | `TOGGLE_MIC` | Toggles the microphone audio track on/off |
@@ -72,16 +80,19 @@ Students, educators, and evaluators can verify the entire studio pipeline by fol
 2. Press <kbd>Space</kbd>:
    - Observe that the recording starts immediately (`Start Recording` switches to active recording mode, timer starts counting, audio meter pulses).
    - Press <kbd>Space</kbd> again to stop recording and trigger the export preparation.
-3. Press <kbd>T</kbd>:
+3. Press <kbd>F</kbd>:
+   - Observe that the active Color-Correction LUT cycles in real-time (Normal -> Grayscale -> Sepia -> Hi-Contrast -> Warm -> Cool -> Bleach -> Invert).
+   - Notice the live preview in the viewport and the `LUT: [NAME]` badge on the canvas update instantly.
+4. Press <kbd>T</kbd>:
    - Notice the real-time recording clock overlay in the top-left corner of the video preview toggles on and off.
    - The checkbox labeled `Timer Overlay` in the top control deck updates in sync.
-4. Press <kbd>C</kbd>:
+5. Press <kbd>C</kbd>:
    - Notice the circular Loom-style webcam bubble toggles visibility.
-5. Press <kbd>M</kbd>:
+6. Press <kbd>M</kbd>:
    - Notice the microphone track toggles between active and muted.
-6. Press <kbd>P</kbd>:
+7. Press <kbd>P</kbd>:
    - Listen to the browser's TTS synthesis voice recite the test phrase in the currently active language at the configured volume.
-7. Inspect the **Shortcuts Overlay** in the bottom-left of the studio viewport:
+8. Inspect the **Shortcuts Overlay** in the bottom-left of the studio viewport:
    - Click the `X` button to minimize to a compact pill button.
    - Click the pill or the `Shortcuts` button in the top deck to expand the HUD back.
 
@@ -103,7 +114,18 @@ Students, educators, and evaluators can verify the entire studio pipeline by fol
 5. Change the app language in the top bar (e.g., from English to French, Japanese, German, or Hindi):
    - Click **Preview TTS** to verify that the speech engine switches to the native test phrase and corresponding BCP-47 voice.
 
-### Step 4: Test Interactive IDE Simulator & Automated Scribe Step Capture
+### Step 4: Test Real-Time Video Filter & Color-Correction LUT Pipeline
+1. In the top deck, click the **LUT: [Name]** dropdown button (`#color-filter-lut-dropdown-btn`) or use the **Color LUT** quick preset pill bar:
+   - Select **Grayscale**: verify black-and-white monochrome tone (ITU-R BT.709 standard).
+   - Select **Sepia**: verify vintage warm amber grading.
+   - Select **Hi-Contrast**: verify punchy contrast expansion and boosted highlight clarity.
+   - Select **Warm LUT** or **Cool Teal**: verify color temperature balance shift.
+   - Select **Invert**: verify inverted tonal luminescence for dark-mode thermal inspections.
+2. Verify that the canvas watermark badge in the top-right corner displays `LUT: [NAME]`.
+3. Press <kbd>Space</kbd> to record a short clip with an active filter applied, then export to MP4/WebM:
+   - Verify that the exported video contains the filtered color correction burnt directly into the video stream before encoding.
+
+### Step 5: Test Interactive IDE Simulator & Automated Scribe Step Capture
 1. In the studio viewport, ensure `Embedded IDE Simulator` is selected.
 2. Click on the buttons inside the simulator (`Run Build`, `Toggle Theme`, or input test text):
    - Notice the expanding ripple rings and cursor halo rendered on the compositor canvas.
@@ -114,14 +136,14 @@ Students, educators, and evaluators can verify the entire studio pipeline by fol
 4. Click **Export WebVTT (.vtt)** or **Export SubRip (.srt)**:
    - Verify that standard timestamped caption files download immediately.
 
-### Step 5: Test Hardware Container Export (MP4 / WebM)
+### Step 6: Test Hardware Container Export (MP4 / WebM)
 1. Select output format quality (e.g. `1080p Full HD` at `60 FPS`).
 2. Record for at least 3–5 seconds using <kbd>Space</kbd>.
 3. Click **Stop & Export** or **Export MP4**:
    - The system muxes the recorded chunks into an MP4/WebM video container and initiates automatic download.
-   - Open the downloaded video in VLC, QuickTime, or Chrome to verify audio/video sync and canvas graphics.
+   - Open the downloaded video in VLC, QuickTime, or Chrome to verify audio/video sync, color LUT grading, and canvas graphics.
 
-### Step 6: Test Systems Capstone Blueprints Hub & Benchmark Lab
+### Step 7: Test Systems Capstone Blueprints Hub & Benchmark Lab
 1. Click the **Blueprints Hub** tab in the navigation bar:
    - Explore all 22 programming languages categorized by the 5 architectural pillars.
    - Click through C++, Rust, Kotlin, Go, Python, and COBOL to inspect production source code.

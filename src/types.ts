@@ -105,3 +105,25 @@ export interface VideoExportOptions {
   annotationMode: AnnotationMode;
   targetLanguage: SupportedLanguageCode;
 }
+
+export type ColorFilterId =
+  | 'none'
+  | 'grayscale'
+  | 'sepia'
+  | 'high-contrast'
+  | 'warm-sunlight'
+  | 'cyberpunk-cool'
+  | 'cinematic-bleach'
+  | 'invert';
+
+export interface ColorFilterPreset {
+  id: ColorFilterId;
+  name: string;
+  label: string;
+  canvasFilter: string;
+  cssFilter: string;
+  description: string;
+  badgeColor: string;
+  previewGradient: string;
+  rgbBalance?: { r: number; g: number; b: number; contrast?: number };
+}

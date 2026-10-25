@@ -1,4 +1,5 @@
-import { SupportedLanguageCode } from '../types';
+import { SupportedLanguageCode, ColorFilterId } from '../types';
+export { COLOR_FILTER_PRESETS, COLOR_FILTER_MAP } from '../utils/colorFilterPipeline';
 
 /**
  * 22 International language test phrases for audio verification
@@ -38,6 +39,7 @@ export const DEFAULT_STUDIO_CONFIG = {
   defaultQuality: '1080p' as const,
   defaultFramerate: 60 as const,
   defaultShowTimerOverlay: true,
+  defaultFilter: 'none' as ColorFilterId,
   defaultCameraWidth: 320,
   defaultCameraHeight: 240,
 };
@@ -87,7 +89,13 @@ export interface KeyboardShortcutDef {
   code: string;
   displayKey: string;
   description: string;
-  action: 'TOGGLE_RECORDING' | 'TOGGLE_TIMER' | 'TOGGLE_CAM' | 'TOGGLE_MIC' | 'PREVIEW_TTS';
+  action:
+    | 'TOGGLE_RECORDING'
+    | 'TOGGLE_TIMER'
+    | 'TOGGLE_CAM'
+    | 'TOGGLE_MIC'
+    | 'PREVIEW_TTS'
+    | 'CYCLE_FILTER';
 }
 
 export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
@@ -97,6 +105,13 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
     displayKey: 'Space',
     description: 'Start / Stop Recording',
     action: 'TOGGLE_RECORDING',
+  },
+  {
+    key: 'f',
+    code: 'KeyF',
+    displayKey: 'F',
+    description: 'Cycle Video Filter / LUT',
+    action: 'CYCLE_FILTER',
   },
   {
     key: 't',
