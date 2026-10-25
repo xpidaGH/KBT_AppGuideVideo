@@ -1,0 +1,6 @@
+{
+  "name": "KBT_AppGuideVideo - Multi-Platform Video Capture & Tutorial Studio",
+  "description": "OBS/Camtasia/Loom/Scribe-grade tutorial creation studio, multi-language captioning and TTS, and comprehensive 22-language software systems engineering capstone blueprints.",
+  "requestFramePermissions": ["camera", "microphone", "display-capture"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
