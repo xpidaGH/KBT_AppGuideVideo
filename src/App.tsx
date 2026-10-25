@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { StudioRecorder } from './components/StudioRecorder';
 import { BlueprintsHub } from './components/BlueprintsHub';
@@ -8,6 +8,7 @@ import { InstallationModal } from './components/InstallationModal';
 import { ArchitectureMapModal } from './components/ArchitectureMapModal';
 import { SupportedLanguageCode } from './types';
 import { LANGUAGE_MAP, SUPPORTED_LANGUAGES } from './data/languages';
+import { KEYBOARD_SHORTCUTS } from './data/recorderConfig';
 import {
   Video,
   BookOpen,
@@ -33,6 +34,54 @@ export default function App() {
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [audioLevel, setAudioLevel] = useState<number>(0);
+
+  // Global Keyboard Listener in App component:
+  // Handles hotkeys for starting/stopping recording (Space key),
+  // toggling recording timer overlay ('T' key), camera bubble ('C' key), mic ('M' key), etc.
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Prevent hijacking text input when user is typing in forms, textareas, or contenteditables
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target instanceof HTMLInputElement ||
+          target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement ||
+          target.isContentEditable ||
+          target.getAttribute('role') === 'textbox')
+      ) {
+        return;
+      }
+
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault(); // Prevent standard page scroll
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_RECORDING' } })
+        );
+      } else if (e.key === 't' || e.key === 'T') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_TIMER' } })
+        );
+      } else if (e.key === 'c' || e.key === 'C') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_CAM' } })
+        );
+      } else if (e.key === 'm' || e.key === 'M') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_MIC' } })
+        );
+      } else if (e.key === 'p' || e.key === 'P') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'PREVIEW_TTS' } })
+        );
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const currentLang = LANGUAGE_MAP[selectedLanguage] || SUPPORTED_LANGUAGES[0];
 

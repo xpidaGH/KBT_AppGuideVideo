@@ -24,9 +24,12 @@ import {
   Sparkles,
   MousePointer,
   ExternalLink,
+  Clock,
   Layers,
   FileText,
   Share2,
+  Keyboard,
+  X,
 } from 'lucide-react';
 import {
   SupportedLanguageCode,
@@ -45,6 +48,14 @@ import {
   triggerDownload,
 } from '../utils/vttSrtExport';
 import { InteractiveAppSimulator } from './InteractiveAppSimulator';
+import {
+  TTS_TEST_PHRASES,
+  DEFAULT_STUDIO_CONFIG,
+  TIMER_OVERLAY_STYLE,
+  VIDEO_QUALITY_OPTIONS,
+  FRAMERATE_OPTIONS,
+  KEYBOARD_SHORTCUTS,
+} from '../data/recorderConfig';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -64,31 +75,6 @@ interface ClickRipple {
   maxRadius: number;
   alpha: number;
 }
-
-const TEST_PHRASES: Record<SupportedLanguageCode, string> = {
-  en: 'Testing audio volume settings in KBT Studio.',
-  fr: 'Test des paramètres de volume audio dans KBT Studio.',
-  de: 'Audiolautstärke-Einstellungen werden in KBT Studio getestet.',
-  es: 'Probando configuración de volumen de audio en KBT Studio.',
-  it: 'Test delle impostazioni del volume audio in KBT Studio.',
-  pt: 'Testando configurações de volume de áudio no KBT Studio.',
-  id: 'Menguji pengaturan volume audio di KBT Studio.',
-  sw: 'Kujaribu mipangilio ya sauti katika KBT Studio.',
-  tr: 'KBT Studio ses seviyesi ayarları test ediliyor.',
-  ru: 'Проверка настроек громкости звука в KBT Studio.',
-  zh: '正在测试 KBT Studio 语音音量设置。',
-  ja: 'KBT Studio の音声音量設定をテストしています。',
-  ar: 'اختبار إعدادات مستوى الصوت في KBT Studio.',
-  ur: 'KBT اسٹوڈیو میں آڈیو والیوم سیٹنگز کی جانچ ہو رہی ہے۔',
-  hi: 'KBT स्टूडियो में ऑडियो वॉल्यूम सेटिंग्स का परीक्षण हो रहा है।',
-  vi: 'Đang kiểm tra cài đặt âm lượng trong KBT Studio.',
-  ko: 'KBT 스튜디오 오디오 볼륨 설정을 테스트합니다.',
-  fa: 'در حال آزمایش تنظیمات صدای KBT Studio.',
-  mr: 'KBT स्टुडिओमध्ये ऑडिओ आवाज सेटिंग्ज तपासत आहे.',
-  bn: 'KBT স্টুডিওতে অডিও ভলিউম সেটিংস পরীক্ষা করা হচ্ছে।',
-  ta: 'KBT Studio-வில் ஒலி அமைப்புகளை சோதிக்கிறது.',
-  te: 'KBT Studio లో ఆడియో వాల్యూమ్ సెట్టింగ్‌లను పరీక్షిస్తోంది.',
-};
 
 export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   selectedLanguage,
@@ -132,11 +118,21 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     isSpeaking: false,
     isPaused: false,
   });
-  const [ttsVolume, setTtsVolume] = useState<number>(1.0);
+  const [ttsVolume, setTtsVolume] = useState<number>(DEFAULT_STUDIO_CONFIG.defaultTtsVolume);
+  const [showTimerOverlay, setShowTimerOverlay] = useState<boolean>(
+    DEFAULT_STUDIO_CONFIG.defaultShowTimerOverlay
+  );
+  const showClockOverlay = showTimerOverlay;
+  const setShowClockOverlay = setShowTimerOverlay;
+  const [showShortcutsOverlay, setShowShortcutsOverlay] = useState<boolean>(true);
 
   // Export settings
-  const [exportQuality, setExportQuality] = useState<'1080p' | '720p'>('1080p');
-  const [exportFramerate, setExportFramerate] = useState<30 | 60>(60);
+  const [exportQuality, setExportQuality] = useState<'1080p' | '720p'>(
+    DEFAULT_STUDIO_CONFIG.defaultQuality
+  );
+  const [exportFramerate, setExportFramerate] = useState<30 | 60>(
+    DEFAULT_STUDIO_CONFIG.defaultFramerate
+  );
   const [isExporting, setIsExporting] = useState<boolean>(false);
 
   // Subscribe to TTS
@@ -241,12 +237,105 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         }
       }
 
+      // 4. Real-time Recording Timer Overlay on the video recording surface
+      if (showTimerOverlay) {
+        ctx.save();
+        const {
+          x,
+          y,
+          width,
+          height,
+          borderRadius,
+          backdropFill,
+          activeStroke,
+          pausedStroke,
+          idleStroke,
+          recDotColor,
+          pauseDotColor,
+          idleDotColor,
+          fontFamily,
+          fontSize,
+          fontWeight,
+        } = TIMER_OVERLAY_STYLE;
+
+        // Dark translucent container pill
+        ctx.fillStyle = backdropFill;
+        ctx.strokeStyle = isRecording
+          ? isPaused
+            ? pausedStroke
+            : activeStroke
+          : idleStroke;
+        ctx.lineWidth = 1.5;
+        ctx.roundRect(x, y, width, height, borderRadius);
+        ctx.fill();
+        ctx.stroke();
+
+        // Pulsing status dot
+        ctx.beginPath();
+        ctx.arc(x + 16, y + height / 2, 5, 0, Math.PI * 2);
+        if (isRecording) {
+          const dotColor = isPaused ? pauseDotColor : recDotColor;
+          ctx.fillStyle = dotColor;
+          ctx.shadowColor = dotColor;
+          ctx.shadowBlur = 8;
+        } else {
+          ctx.fillStyle = idleDotColor;
+          ctx.shadowColor = idleDotColor;
+          ctx.shadowBlur = 4;
+        }
+        ctx.fill();
+        ctx.shadowBlur = 0;
+
+        // Recording Timer / Clock text
+        ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+
+        let timerText = '';
+        if (isRecording) {
+          const m = Math.floor(recordingSeconds / 60);
+          const s = recordingSeconds % 60;
+          const status = isPaused ? 'PAUSE' : 'REC';
+          timerText = `${status} ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+        } else {
+          const now = new Date();
+          const timeStr = now.toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+            hour12: false,
+          });
+          timerText = `LIVE ${timeStr}`;
+        }
+
+        ctx.fillStyle = isRecording ? (isPaused ? '#fbbf24' : '#ffffff') : '#e4e4e7';
+        ctx.fillText(timerText, x + 28, y + height / 2);
+
+        // Framerate indicator tag
+        ctx.font = `600 10px ${fontFamily}`;
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#a1a1aa';
+        ctx.fillText(`${exportFramerate}FPS`, x + width - 10, y + height / 2);
+
+        ctx.restore();
+      }
+
       animId = requestAnimationFrame(render);
     };
 
     render();
     return () => cancelAnimationFrame(animId);
-  }, [cues, isRecording, recordingSeconds, selectedLanguage, showAnnotations, annotationMode]);
+  }, [
+    cues,
+    isRecording,
+    isPaused,
+    recordingSeconds,
+    selectedLanguage,
+    showAnnotations,
+    annotationMode,
+    showTimerOverlay,
+    exportFramerate,
+  ]);
 
   // Initialize Camera stream if enabled
   useEffect(() => {
@@ -535,10 +624,44 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
 
   const handlePreviewTts = () => {
     const phrase =
-      TEST_PHRASES[selectedLanguage] ||
+      TTS_TEST_PHRASES[selectedLanguage] ||
       `Testing audio volume at ${Math.round(ttsVolume * 100)} percent.`;
     speakWithUtterance(phrase, selectedLanguage);
   };
+
+  // Ref to track current isRecording state for hotkey event handling
+  const isRecordingRef = useRef(isRecording);
+  isRecordingRef.current = isRecording;
+
+  // Listen for global keyboard shortcuts dispatched from the App root listener
+  useEffect(() => {
+    const handleCustomHotkey = (e: Event) => {
+      const customEvent = e as CustomEvent<{ action: string }>;
+      const action = customEvent.detail?.action;
+      if (!action) return;
+
+      if (action === 'TOGGLE_RECORDING') {
+        if (!isRecordingRef.current) {
+          handleStartRecording();
+        } else {
+          handleStopRecording();
+        }
+      } else if (action === 'TOGGLE_TIMER') {
+        setShowTimerOverlay((prev) => !prev);
+      } else if (action === 'TOGGLE_CAM') {
+        setIsCameraActive((prev) => !prev);
+      } else if (action === 'TOGGLE_MIC') {
+        setIsMicActive((prev) => !prev);
+      } else if (action === 'PREVIEW_TTS') {
+        handlePreviewTts();
+      }
+    };
+
+    window.addEventListener('kbt-hotkey', handleCustomHotkey);
+    return () => {
+      window.removeEventListener('kbt-hotkey', handleCustomHotkey);
+    };
+  }, [selectedLanguage, ttsVolume]);
 
   return (
     <div className="studio-recorder-container space-y-4 max-w-7xl mx-auto">
@@ -596,6 +719,51 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           >
             {isMicActive ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
             <span className="hidden sm:inline">Mic Track</span>
+          </button>
+
+          {/* Real-time Recording Timer Overlay Checkbox */}
+          <label
+            htmlFor="recording-timer-overlay-checkbox"
+            title="Toggle real-time recording timer overlay on video recording surface"
+            className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-2 transition cursor-pointer select-none ${
+              showTimerOverlay
+                ? 'bg-indigo-950/40 text-indigo-300 border-indigo-800/60 shadow-sm'
+                : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-400'
+            }`}
+          >
+            <input
+              type="checkbox"
+              id="recording-timer-overlay-checkbox"
+              checked={showTimerOverlay}
+              onChange={(e) => setShowTimerOverlay(e.target.checked)}
+              className="w-3.5 h-3.5 rounded border-zinc-700 bg-zinc-900 text-indigo-600 focus:ring-indigo-500 accent-indigo-600 cursor-pointer"
+            />
+            <Clock className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline font-medium">Timer Overlay</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                showTimerOverlay ? 'bg-indigo-400 animate-pulse' : 'bg-zinc-600'
+              }`}
+            />
+          </label>
+
+          {/* Shortcuts Overlay Toggle Button */}
+          <button
+            type="button"
+            id="studio-shortcuts-toggle-btn"
+            onClick={() => setShowShortcutsOverlay((prev) => !prev)}
+            title="Toggle keyboard shortcuts HUD overlay"
+            className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer ${
+              showShortcutsOverlay
+                ? 'bg-indigo-950/50 text-indigo-300 border-indigo-700/70 shadow-sm'
+                : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-300'
+            }`}
+          >
+            <Keyboard className="w-3.5 h-3.5 text-indigo-400" />
+            <span className="hidden sm:inline font-medium">Shortcuts</span>
+            <span className="hidden xl:inline text-[10px] px-1 py-0.5 rounded bg-zinc-900 border border-zinc-800 font-mono text-zinc-400">
+              Space / T
+            </span>
           </button>
 
           {/* Visual Annotations Toggler */}
@@ -662,9 +830,10 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           {/* Preview TTS Button */}
           <button
             type="button"
+            id="preview-tts-button"
             onClick={handlePreviewTts}
             title={`Preview TTS test phrase in ${LANGUAGE_MAP[selectedLanguage]?.name} at ${Math.round(ttsVolume * 100)}% volume`}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-850 hover:border-indigo-500/50 text-indigo-300 hover:text-white border border-zinc-800 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
+            className="preview-tts-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-850 hover:border-indigo-500/50 text-indigo-300 hover:text-white border border-zinc-800 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
           >
             <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
             <span>Preview TTS</span>
@@ -677,8 +846,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               onChange={(e) => setExportQuality(e.target.value as any)}
               className="bg-transparent text-zinc-200 focus:outline-none cursor-pointer"
             >
-              <option value="1080p" className="bg-zinc-900">1080p</option>
-              <option value="720p" className="bg-zinc-900">720p</option>
+              {VIDEO_QUALITY_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-zinc-900">
+                  {opt.label}
+                </option>
+              ))}
             </select>
             <span className="text-zinc-600">|</span>
             <select
@@ -686,8 +858,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               onChange={(e) => setExportFramerate(Number(e.target.value) as any)}
               className="bg-transparent text-zinc-200 focus:outline-none cursor-pointer"
             >
-              <option value="60" className="bg-zinc-900">60 FPS</option>
-              <option value="30" className="bg-zinc-900">30 FPS</option>
+              {FRAMERATE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value} className="bg-zinc-900">
+                  {opt.label}
+                </option>
+              ))}
             </select>
           </div>
 
@@ -767,11 +942,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           </div>
         )}
 
-        {/* Compositor Canvas Overlay (Cursor Halo, Click Ripples, Softsubs) */}
+        {/* Compositor Canvas Overlay (Cursor Halo, Click Ripples, Softsubs, Timer Overlay) */}
         <canvas
           ref={canvasRef}
-          width={1280}
-          height={720}
+          width={DEFAULT_STUDIO_CONFIG.canvasWidth}
+          height={DEFAULT_STUDIO_CONFIG.canvasHeight}
           className="absolute inset-0 w-full h-full pointer-events-none z-20"
         />
 
@@ -795,6 +970,70 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               Webcam (Loom)
             </div>
           </div>
+        )}
+
+        {/* Small 'Shortcuts' Overlay in the StudioRecorder Viewport */}
+        {showShortcutsOverlay ? (
+          <div
+            id="studio-shortcuts-overlay"
+            className="shortcuts-overlay absolute bottom-4 left-4 z-30 w-64 bg-zinc-950/92 backdrop-blur-md border border-zinc-800/90 rounded-2xl p-3 shadow-2xl text-xs space-y-2 pointer-events-auto transition animate-in fade-in duration-150"
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-zinc-800/80 pb-1.5">
+              <div className="flex items-center gap-1.5 text-indigo-300 font-bold tracking-wide">
+                <Keyboard className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Shortcuts</span>
+              </div>
+              <button
+                type="button"
+                id="close-shortcuts-overlay-btn"
+                onClick={() => setShowShortcutsOverlay(false)}
+                className="text-zinc-500 hover:text-zinc-300 p-0.5 rounded transition cursor-pointer"
+                title="Hide shortcuts overlay"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-1 font-mono text-[11px]">
+              {KEYBOARD_SHORTCUTS.map((sc) => (
+                <div
+                  key={sc.action}
+                  className="flex items-center justify-between gap-2 text-zinc-300 px-1 py-0.5 rounded hover:bg-zinc-900/70 transition"
+                >
+                  <span className="text-zinc-400 font-sans text-xs truncate">{sc.description}</span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-amber-300 font-bold text-[10px] shadow-xs shrink-0">
+                    {sc.displayKey}
+                  </kbd>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-1.5 border-t border-zinc-900 text-[10px] text-zinc-500 font-sans flex items-center justify-between">
+              <span>Global App Listener</span>
+              <span className="flex items-center gap-1 font-mono text-zinc-400 text-[9px]">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${
+                    isRecording ? 'bg-red-500 animate-pulse' : 'bg-emerald-500'
+                  }`}
+                />
+                {isRecording ? 'RECORDING' : 'IDLE'}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <button
+            type="button"
+            id="open-shortcuts-pill-btn"
+            onClick={() => setShowShortcutsOverlay(true)}
+            title="Display keyboard shortcuts overlay"
+            className="shortcuts-overlay absolute bottom-4 left-4 z-30 px-2.5 py-1 rounded-xl bg-zinc-950/80 hover:bg-zinc-900 backdrop-blur-md border border-zinc-800 hover:border-indigo-500/50 text-zinc-300 hover:text-white text-[11px] font-mono flex items-center gap-1.5 shadow-xl transition pointer-events-auto cursor-pointer"
+          >
+            <Keyboard className="w-3 h-3 text-indigo-400" />
+            <span>Shortcuts</span>
+            <kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-[9px] text-amber-300 font-bold">
+              Space / T
+            </kbd>
+          </button>
         )}
       </div>
 
@@ -878,57 +1117,32 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              {/* Range Input Slider for Web Speech API SpeechSynthesisUtterance.volume */}
-              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleVolumeChange(ttsVolume > 0 ? 0 : 1.0)}
-                  title={ttsVolume === 0 ? 'Unmute (Set utterance.volume = 1.0)' : 'Mute (Set utterance.volume = 0.0)'}
-                  className="text-zinc-400 hover:text-white transition flex items-center justify-center"
-                >
-                  {ttsVolume === 0 ? (
-                    <VolumeX className="w-4 h-4 text-red-400" />
-                  ) : ttsVolume < 0.5 ? (
-                    <Volume1 className="w-4 h-4 text-indigo-400" />
-                  ) : (
-                    <Volume2 className="w-4 h-4 text-indigo-400" />
-                  )}
-                </button>
-                <div className="flex items-center gap-2">
-                  <label htmlFor="tts-speech-volume-range" className="text-[10px] text-zinc-400 font-mono whitespace-nowrap cursor-pointer">
-                    TTS Vol
-                  </label>
-                  <input
-                    id="tts-speech-volume-range"
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={ttsVolume}
-                    onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-                    title={`Web Speech API SpeechSynthesisUtterance.volume = ${ttsVolume.toFixed(2)}`}
-                    aria-label="Web Speech API Synthesis Volume"
-                    className="w-20 sm:w-28 h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none"
-                  />
-                  <span
-                    className="text-[11px] font-mono text-zinc-200 w-9 text-right font-semibold"
-                    title={`utterance.volume = ${ttsVolume.toFixed(2)}`}
-                  >
-                    {Math.round(ttsVolume * 100)}%
-                  </span>
-                </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Synchronized Volume Indicator Badge linked to top slider state */}
+              <div
+                title={`SpeechSynthesisUtterance.volume is synchronized at ${Math.round(ttsVolume * 100)}%`}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800 text-xs font-mono text-zinc-300"
+              >
+                {ttsVolume === 0 ? (
+                  <VolumeX className="w-3.5 h-3.5 text-red-400" />
+                ) : ttsVolume < 0.5 ? (
+                  <Volume1 className="w-3.5 h-3.5 text-indigo-400" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
+                )}
+                <span>Vol: {Math.round(ttsVolume * 100)}%</span>
               </div>
 
               {/* Preview TTS Button */}
               <button
                 type="button"
+                id="preview-tts-button-annotations"
                 onClick={handlePreviewTts}
                 title={`Preview TTS test phrase in ${LANGUAGE_MAP[selectedLanguage]?.name} at ${Math.round(ttsVolume * 100)}% volume`}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 hover:border-indigo-500/50 text-indigo-300 hover:text-white border border-zinc-800 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
+                className="preview-tts-btn flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 hover:border-indigo-500/50 text-indigo-300 hover:text-white border border-zinc-800 text-xs font-semibold shadow-sm transition active:scale-95 cursor-pointer"
               >
                 <Volume2 className="w-3.5 h-3.5 text-indigo-400" />
-                <span>Preview TTS</span>
+                <span>Test Voice</span>
               </button>
 
               {!ttsState.isSpeaking ? (
