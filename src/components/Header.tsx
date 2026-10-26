@@ -47,16 +47,22 @@ export const Header: React.FC<HeaderProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur-md border-b border-zinc-800 text-zinc-100 px-4 py-2.5">
+    <header
+      className={`sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-md border-b transition-all duration-300 text-zinc-100 px-4 py-2.5 ${
+        isRecording
+          ? 'border-red-500/50 shadow-[0_4px_25px_-5px_rgba(239,68,68,0.25)]'
+          : 'border-zinc-800'
+      }`}
+    >
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
         {/* Brand & Tally Status */}
         <div className="flex items-center gap-3">
           <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/20 border border-indigo-400/30">
             <Video className="w-5 h-5 text-white" />
             {isRecording && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-zinc-950"></span>
+              <span className="absolute -top-1 -right-1 flex h-4 w-4" title="Live Recording Active">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-80"></span>
+                <span className="relative inline-flex rounded-full h-4 w-4 bg-red-600 border-2 border-zinc-950 shadow-sm shadow-red-500"></span>
               </span>
             )}
           </div>
@@ -69,21 +75,74 @@ export const Header: React.FC<HeaderProps> = ({
               <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
                 v2.4
               </span>
-              {isRecording ? (
-                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-red-500/10 border border-red-500/30 text-red-400 text-xs font-mono font-medium animate-pulse">
-                  <span className="w-2 h-2 rounded-full bg-red-500"></span>
-                  REC {formatTime(recordingSeconds)}
-                </div>
-              ) : (
-                <span className="hidden sm:inline-block text-[11px] text-zinc-400 font-mono">
-                  OBS/Loom/Scribe Studio
-                </span>
-              )}
             </div>
             <p className="text-[11px] text-zinc-400 hidden md:block">
               Multi-Platform Capture & 22-Language Capstone Architecture
             </p>
           </div>
+        </div>
+
+        {/* Prominent Visual Recording Indicator (Pulsing Red Dot, REC Badge & Live Timer) */}
+        <div
+          id="header-recording-indicator"
+          role="status"
+          aria-live="polite"
+          className={`flex items-center gap-2.5 px-3 py-1.5 rounded-full border transition-all duration-300 ${
+            isRecording
+              ? 'bg-red-950/80 border-red-500/70 shadow-lg shadow-red-500/20 text-red-200 ring-1 ring-red-500/40'
+              : 'bg-zinc-900/70 border-zinc-800 text-zinc-500'
+          }`}
+          title={
+            isRecording
+              ? 'Recording in progress! Press Space to stop/pause or toggle controls.'
+              : 'Capture Standby (Press Space or click Start Recording)'
+          }
+        >
+          {isRecording ? (
+            <>
+              {/* Concentric pulsing / blinking red dot */}
+              <div className="relative flex items-center justify-center w-3 h-3">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-80"></span>
+                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 shadow-md shadow-red-500 animate-pulse"></span>
+              </div>
+
+              {/* Bold REC label & monospace elapsed timer */}
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] font-black tracking-widest text-red-400 uppercase font-mono">
+                  REC
+                </span>
+                <span className="text-xs font-mono font-bold text-white tracking-wider">
+                  {formatTime(recordingSeconds)}
+                </span>
+              </div>
+
+              {/* Live Audio Activity Bars during recording */}
+              <div
+                className="hidden sm:flex items-center gap-0.5 pl-1.5 border-l border-red-500/30 h-3"
+                title={`Live Mic Audio Signal: ${Math.round(audioLevel * 100)}%`}
+              >
+                <span
+                  className="w-0.5 rounded-full bg-red-400 transition-all duration-75"
+                  style={{ height: `${Math.max(4, Math.min(12, audioLevel * 20))}px` }}
+                />
+                <span
+                  className="w-0.5 rounded-full bg-red-300 transition-all duration-75"
+                  style={{ height: `${Math.max(6, Math.min(14, audioLevel * 30))}px` }}
+                />
+                <span
+                  className="w-0.5 rounded-full bg-red-400 transition-all duration-75"
+                  style={{ height: `${Math.max(4, Math.min(12, audioLevel * 22))}px` }}
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-zinc-600"></span>
+              <span className="text-[10px] font-mono tracking-wider font-semibold text-zinc-400 uppercase">
+                STANDBY
+              </span>
+            </>
+          )}
         </div>
 
         {/* Tab Navigation */}

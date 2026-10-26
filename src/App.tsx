@@ -19,6 +19,7 @@ import {
   Cpu,
   Layers,
   ArrowRight,
+  Keyboard,
 } from 'lucide-react';
 
 export default function App() {
@@ -78,8 +79,13 @@ export default function App() {
         window.dispatchEvent(
           new CustomEvent('kbt-hotkey', { detail: { action: 'CYCLE_FILTER' } })
         );
+      } else if (e.key === 'd' || e.key === 'D') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_DRAW' } })
+        );
       }
     };
+
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -220,25 +226,66 @@ export default function App() {
         {currentTab === 'benchmarks' && <BenchmarkLab />}
       </main>
 
-      {/* Footer */}
-      <footer className="mt-auto border-t border-zinc-900 bg-zinc-950 px-6 py-4 text-xs text-zinc-500 flex flex-wrap items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          <span className="font-mono font-bold text-zinc-400">KBT_AppGuideVideo</span>
-          <span>•</span>
-          <span>International Systems Programming & Multimedia Engineering Curriculum</span>
+      {/* Footer & Global Keyboard Shortcuts Legend */}
+      <footer className="mt-auto border-t border-zinc-900 bg-zinc-950 text-xs text-zinc-500">
+        {/* Visual Keyboard Shortcuts Legend Bar */}
+        <div
+          id="footer-keyboard-shortcuts-legend"
+          className="px-4 sm:px-6 py-2.5 bg-zinc-900/40 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 text-xs"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-indigo-950/70 border border-indigo-700/50 text-indigo-300 font-mono text-[10px] font-bold uppercase tracking-wider">
+              <Keyboard className="w-3 h-3 text-indigo-400" />
+              <span>Hotkeys</span>
+            </span>
+            <span className="text-zinc-400 font-medium text-[11px] hidden sm:inline">
+              Global Studio Shortcuts (Press or click key):
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+            {KEYBOARD_SHORTCUTS.map((sc) => (
+              <button
+                key={sc.action}
+                type="button"
+                id={`footer-shortcut-${sc.displayKey.toLowerCase()}`}
+                onClick={() =>
+                  window.dispatchEvent(
+                    new CustomEvent('kbt-hotkey', { detail: { action: sc.action } })
+                  )
+                }
+                title={`Hotkey [${sc.displayKey}]: ${sc.description}`}
+                className="shortcut-legend-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-850 hover:border-indigo-500/50 border border-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 shadow-xs cursor-pointer"
+              >
+                <kbd className="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-amber-300 font-mono font-bold text-[10px] shadow-xs">
+                  {sc.displayKey}
+                </kbd>
+                <span className="text-[11px] font-sans text-zinc-400">{sc.description}</span>
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="flex items-center gap-4 text-[11px]">
-          <button onClick={() => setIsUserGuideOpen(true)} className="hover:text-zinc-300 transition">
-            USER_GUIDE.md (22 Languages)
-          </button>
-          <span>•</span>
-          <button onClick={() => setIsInstallGuideOpen(true)} className="hover:text-zinc-300 transition">
-            INSTALLATION.md (Multi-Platform)
-          </button>
-          <span>•</span>
-          <button onClick={() => setIsArchitectureMapOpen(true)} className="hover:text-zinc-300 transition">
-            Architecture Map
-          </button>
+
+        {/* Footer Meta & Documentation Links */}
+        <div className="px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <span className="font-mono font-bold text-zinc-400">KBT_AppGuideVideo</span>
+            <span>•</span>
+            <span>International Systems Programming & Multimedia Engineering Curriculum</span>
+          </div>
+          <div className="flex items-center gap-4 text-[11px]">
+            <button onClick={() => setIsUserGuideOpen(true)} className="hover:text-zinc-300 transition">
+              USER_GUIDE.md (22 Languages)
+            </button>
+            <span>•</span>
+            <button onClick={() => setIsInstallGuideOpen(true)} className="hover:text-zinc-300 transition">
+              INSTALLATION.md (Multi-Platform)
+            </button>
+            <span>•</span>
+            <button onClick={() => setIsArchitectureMapOpen(true)} className="hover:text-zinc-300 transition">
+              Architecture Map
+            </button>
+          </div>
         </div>
       </footer>
 

@@ -1,4 +1,4 @@
-import { SoftsubCue, SupportedLanguageCode, ScribeWorkflowStep } from '../types';
+import { SoftsubCue, SupportedLanguageCode, ScribeWorkflowStep, ProjectRecordingMetadata } from '../types';
 
 /**
  * Format seconds to WebVTT timestamp: 00:01:23.456
@@ -25,6 +25,23 @@ export function formatSrtTimestamp(seconds: number): string {
   const pad = (n: number, z = 2) => String(n).padStart(z, '0');
   return `${pad(hrs)}:${pad(mins)}:${pad(secs)},${pad(ms, 3)}`;
 }
+
+/**
+ * Format duration in seconds to standard display counter: MM:SS or HH:MM:SS
+ */
+export function formatDisplayDuration(seconds: number): string {
+  const safeSec = Math.max(0, Math.floor(seconds || 0));
+  const hrs = Math.floor(safeSec / 3600);
+  const mins = Math.floor((safeSec % 3600) / 60);
+  const secs = safeSec % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  if (hrs > 0) {
+    return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+  }
+  return `${pad(mins)}:${pad(secs)}`;
+}
+
 
 /**
  * Generate WebVTT content for a given target language
@@ -102,3 +119,24 @@ export function triggerDownload(content: string, filename: string, mimeType: str
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Sanitize a string for safe usage in file names
+ */
+export function sanitizeFileName(name: string, fallback: string = 'KBT_Tutorial'): string {
+  if (!name || typeof name !== 'string') return fallback;
+  const sanitized = name
+    .trim()
+    .replace(/[^\w\s-]/gi, '')
+    .replace(/\s+/g, '_')
+    .slice(0, 60);
+  return sanitized || fallback;
+}
+
+/**
+ * Generate formatted JSON companion metadata manifest
+ */
+export function generateProjectMetadataJson(metadata: ProjectRecordingMetadata): string {
+  return JSON.stringify(metadata, null, 2);
+}
+

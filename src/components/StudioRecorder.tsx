@@ -32,6 +32,22 @@ import {
   X,
   Palette,
   SlidersHorizontal,
+  Monitor,
+  Smartphone,
+  Tv,
+  Film,
+  FileVideo,
+  Image as ImageIcon,
+  Tag,
+  FileJson,
+  FolderArchive,
+  Info,
+  HardDrive,
+  Highlighter,
+  PenTool,
+  Undo2,
+  ArrowUpRight,
+  CircleDot,
 } from 'lucide-react';
 import {
   SupportedLanguageCode,
@@ -40,6 +56,15 @@ import {
   AnnotationMode,
   VideoExportOptions,
   ColorFilterId,
+  AspectRatioId,
+  AspectRatioPreset,
+  ExportFormatId,
+  ExportFormatPreset,
+  ProjectRecordingMetadata,
+  SavedProjectSettings,
+  DrawingToolType,
+  DrawingStroke,
+  DrawingPoint,
 } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
 import { INITIAL_SOFTSUB_CUES, INITIAL_SCRIBE_STEPS } from '../data/annotationsData';
@@ -49,19 +74,32 @@ import {
   generateSRT,
   generateScribeMarkdown,
   triggerDownload,
+  sanitizeFileName,
+  generateProjectMetadataJson,
+  formatDisplayDuration,
 } from '../utils/vttSrtExport';
+
 import { InteractiveAppSimulator } from './InteractiveAppSimulator';
 import {
   TTS_TEST_PHRASES,
   DEFAULT_STUDIO_CONFIG,
+  STUDIO_PROJECT_SETTINGS_STORAGE_KEY,
   TIMER_OVERLAY_STYLE,
   VIDEO_QUALITY_OPTIONS,
   FRAMERATE_OPTIONS,
   KEYBOARD_SHORTCUTS,
   COLOR_FILTER_PRESETS,
   COLOR_FILTER_MAP,
+  ASPECT_RATIO_PRESETS,
+  ASPECT_RATIO_MAP,
+  EXPORT_FORMAT_PRESETS,
+  EXPORT_FORMAT_MAP,
+  DRAWING_COLOR_PRESETS,
 } from '../data/recorderConfig';
+
+
 import { applyLutToImageData } from '../utils/colorFilterPipeline';
+import { createAnimatedGifBlob, sampleCanvasFrame } from '../utils/gifEncoder';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -82,7 +120,21 @@ interface ClickRipple {
   alpha: number;
 }
 
+// Safely load persisted project title, description, and export settings from local storage
+function loadSavedProjectSettings(): Partial<SavedProjectSettings> | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(STUDIO_PROJECT_SETTINGS_STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn('Failed to parse saved project settings from localStorage:', err);
+    return null;
+  }
+}
+
 export const StudioRecorder: React.FC<StudioRecorderProps> = ({
+
   selectedLanguage,
   onLanguageChange,
   isRecording,
@@ -132,10 +184,25 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const setShowClockOverlay = setShowTimerOverlay;
   const [showShortcutsOverlay, setShowShortcutsOverlay] = useState<boolean>(true);
 
+  // Video Aspect Ratio Pipeline (16:9 Landscape YouTube, 9:16 Portrait TikTok/Reels/Shorts, 1:1 Square Instagram, 4:3 Slides)
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatioId>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.selectedAspectRatio && ASPECT_RATIO_MAP[saved.selectedAspectRatio]) {
+      return saved.selectedAspectRatio;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultAspectRatio;
+  });
+  const activeAspectRatio =
+    ASPECT_RATIO_MAP[selectedAspectRatio] || ASPECT_RATIO_MAP['16:9'];
+
   // Real-time Canvas-based Video Filter & Color-Correction LUT Pipeline
-  const [selectedFilter, setSelectedFilter] = useState<ColorFilterId>(
-    DEFAULT_STUDIO_CONFIG.defaultFilter
-  );
+  const [selectedFilter, setSelectedFilter] = useState<ColorFilterId>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.selectedFilter && COLOR_FILTER_MAP[saved.selectedFilter]) {
+      return saved.selectedFilter;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultFilter;
+  });
   const [usePixelLutEngine, setUsePixelLutEngine] = useState<boolean>(false);
   const [showFilterMenu, setShowFilterMenu] = useState<boolean>(false);
   const screenVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -149,14 +216,344 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     });
   };
 
-  // Export settings
-  const [exportQuality, setExportQuality] = useState<'1080p' | '720p'>(
-    DEFAULT_STUDIO_CONFIG.defaultQuality
-  );
-  const [exportFramerate, setExportFramerate] = useState<30 | 60>(
-    DEFAULT_STUDIO_CONFIG.defaultFramerate
-  );
+  // Export settings & Format Pipeline (MP4, WEBM, GIF)
+  const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatId>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.selectedExportFormat && EXPORT_FORMAT_MAP[saved.selectedExportFormat]) {
+      return saved.selectedExportFormat;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultExportFormat;
+  });
+  const activeExportFormat =
+    EXPORT_FORMAT_MAP[selectedExportFormat] || EXPORT_FORMAT_MAP.mp4;
+  const [exportQuality, setExportQuality] = useState<'1080p' | '720p'>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.exportQuality === '1080p' || saved?.exportQuality === '720p') {
+      return saved.exportQuality;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultQuality;
+  });
+  const [exportFramerate, setExportFramerate] = useState<30 | 60>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.exportFramerate === 30 || saved?.exportFramerate === 60) {
+      return saved.exportFramerate;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultFramerate;
+  });
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportStatusText, setExportStatusText] = useState<string>('');
+  const recordedBlobRef = useRef<Blob | null>(null);
+  const sampledGifFramesRef = useRef<ImageData[]>([]);
+
+  // Project Title & Description Metadata State (Configurable before and during recording)
+  const [projectTitle, setProjectTitle] = useState<string>(() => {
+    const saved = loadSavedProjectSettings();
+    if (typeof saved?.projectTitle === 'string') {
+      return saved.projectTitle;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultProjectTitle;
+  });
+  const [projectDescription, setProjectDescription] = useState<string>(() => {
+    const saved = loadSavedProjectSettings();
+    if (typeof saved?.projectDescription === 'string') {
+      return saved.projectDescription;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultProjectDescription;
+  });
+  const [saveMetadataAlongside, setSaveMetadataAlongside] = useState<boolean>(() => {
+    const saved = loadSavedProjectSettings();
+    if (typeof saved?.saveMetadataAlongside === 'boolean') {
+      return saved.saveMetadataAlongside;
+    }
+    return true;
+  });
+  const [showProjectMetaEditor, setShowProjectMetaEditor] = useState<boolean>(true);
+
+  // Auto-Save Persistence State
+  const [lastAutoSavedTime, setLastAutoSavedTime] = useState<string | null>(() => {
+    const saved = loadSavedProjectSettings();
+    return saved?.lastSavedAt || null;
+  });
+  const [autoSavePulse, setAutoSavePulse] = useState<boolean>(false);
+  const hasMountedRef = useRef<boolean>(false);
+
+  // Auto-save effect: persists project title, description, and export settings to local storage whenever modified
+  useEffect(() => {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      return;
+    }
+
+    try {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const payload: SavedProjectSettings = {
+        projectTitle,
+        projectDescription,
+        selectedExportFormat,
+        selectedAspectRatio,
+        exportQuality,
+        exportFramerate,
+        saveMetadataAlongside,
+        selectedFilter,
+        lastSavedAt: timeStr,
+      };
+
+      localStorage.setItem(STUDIO_PROJECT_SETTINGS_STORAGE_KEY, JSON.stringify(payload));
+      setLastAutoSavedTime(timeStr);
+      setAutoSavePulse(true);
+      const timer = setTimeout(() => setAutoSavePulse(false), 1400);
+      return () => clearTimeout(timer);
+    } catch (err) {
+      console.warn('Failed to auto-save project settings to localStorage:', err);
+    }
+  }, [
+    projectTitle,
+    projectDescription,
+    selectedExportFormat,
+    selectedAspectRatio,
+    exportQuality,
+    exportFramerate,
+    saveMetadataAlongside,
+    selectedFilter,
+  ]);
+
+  // Reset to default factory settings and clear localStorage
+  const handleResetSavedSettings = () => {
+    try {
+      localStorage.removeItem(STUDIO_PROJECT_SETTINGS_STORAGE_KEY);
+      setProjectTitle(DEFAULT_STUDIO_CONFIG.defaultProjectTitle);
+      setProjectDescription(DEFAULT_STUDIO_CONFIG.defaultProjectDescription);
+      setSelectedExportFormat(DEFAULT_STUDIO_CONFIG.defaultExportFormat);
+      setSelectedAspectRatio(DEFAULT_STUDIO_CONFIG.defaultAspectRatio);
+      setExportQuality(DEFAULT_STUDIO_CONFIG.defaultQuality);
+      setExportFramerate(DEFAULT_STUDIO_CONFIG.defaultFramerate);
+      setSaveMetadataAlongside(true);
+      setSelectedFilter(DEFAULT_STUDIO_CONFIG.defaultFilter);
+      setLastAutoSavedTime(null);
+      setAutoSavePulse(true);
+      setTimeout(() => setAutoSavePulse(false), 1200);
+    } catch (err) {
+      console.warn('Failed to reset project settings:', err);
+    }
+  };
+
+  // Drawing & Screen Highlight Overlay State (Real-Time Annotation on Canvas)
+  const [isDrawModeActive, setIsDrawModeActive] = useState<boolean>(false);
+  const [drawingTool, setDrawingTool] = useState<DrawingToolType>('highlighter');
+  const [drawingColor, setDrawingColor] = useState<string>('#facc15'); // Neon yellow default
+  const [drawingStrokeWidth, setDrawingStrokeWidth] = useState<number>(22);
+  const [strokes, setStrokes] = useState<DrawingStroke[]>([]);
+  const [currentStroke, setCurrentStroke] = useState<DrawingStroke | null>(null);
+  const strokesRef = useRef<DrawingStroke[]>([]);
+  strokesRef.current = strokes;
+  const currentStrokeRef = useRef<DrawingStroke | null>(null);
+  currentStrokeRef.current = currentStroke;
+
+  const handleUndoStroke = () => {
+    setStrokes((prev) => {
+      const next = prev.slice(0, -1);
+      strokesRef.current = next;
+      return next;
+    });
+  };
+
+  const handleClearStrokes = () => {
+    setStrokes([]);
+    strokesRef.current = [];
+    setCurrentStroke(null);
+    currentStrokeRef.current = null;
+  };
+
+  const handleDrawingPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawModeActive) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const scaleX = activeAspectRatio.width / rect.width;
+    const scaleY = activeAspectRatio.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    const width = drawingTool === 'highlighter' ? 22 : drawingTool === 'pen' ? 4 : 3;
+    const newStroke: DrawingStroke = {
+      id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      tool: drawingTool,
+      color: drawingColor,
+      strokeWidth: width,
+      points: [{ x, y }],
+      timestamp: Date.now(),
+    };
+    setCurrentStroke(newStroke);
+    currentStrokeRef.current = newStroke;
+    try {
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDrawingPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawModeActive || !currentStrokeRef.current) return;
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    const scaleX = activeAspectRatio.width / rect.width;
+    const scaleY = activeAspectRatio.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    if (drawingTool === 'pen' || drawingTool === 'highlighter') {
+      setCurrentStroke((prev) => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          points: [...prev.points, { x, y }],
+        };
+        currentStrokeRef.current = updated;
+        return updated;
+      });
+    } else {
+      setCurrentStroke((prev) => {
+        if (!prev) return null;
+        const updated = {
+          ...prev,
+          points: [prev.points[0], { x, y }],
+        };
+        currentStrokeRef.current = updated;
+        return updated;
+      });
+    }
+  };
+
+  const handleDrawingPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawModeActive) return;
+    if (currentStrokeRef.current && currentStrokeRef.current.points.length > 0) {
+      const strokeToCommit = currentStrokeRef.current;
+      setStrokes((prev) => {
+        const next = [...prev, strokeToCommit];
+        strokesRef.current = next;
+        return next;
+      });
+    }
+    setCurrentStroke(null);
+    currentStrokeRef.current = null;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // ignore
+    }
+  };
+
+  // Helper to render drawing and screen highlight annotations onto the compositor canvas
+  const renderDrawingStroke = (ctx: CanvasRenderingContext2D, stroke: DrawingStroke) => {
+    if (!stroke.points || stroke.points.length === 0) return;
+    ctx.save();
+
+    if (stroke.tool === 'highlighter') {
+      ctx.globalAlpha = 0.42;
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.strokeWidth || 22;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.shadowColor = stroke.color;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      }
+      ctx.stroke();
+    } else if (stroke.tool === 'pen') {
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = stroke.color;
+      ctx.lineWidth = stroke.strokeWidth || 4;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
+      for (let i = 1; i < stroke.points.length; i++) {
+        ctx.lineTo(stroke.points[i].x, stroke.points[i].y);
+      }
+      ctx.stroke();
+    } else if (stroke.tool === 'rect') {
+      if (stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        const rx = Math.min(p1.x, p2.x);
+        const ry = Math.min(p1.y, p2.y);
+        const rw = Math.max(4, Math.abs(p2.x - p1.x));
+        const rh = Math.max(4, Math.abs(p2.y - p1.y));
+
+        ctx.fillStyle = stroke.color + '26'; // ~15% fill highlight
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.strokeWidth || 3;
+        ctx.shadowColor = stroke.color;
+        ctx.shadowBlur = 10;
+        ctx.roundRect(rx, ry, rw, rh, 8);
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (stroke.tool === 'circle') {
+      if (stroke.points.length >= 2) {
+        const p1 = stroke.points[0];
+        const p2 = stroke.points[stroke.points.length - 1];
+        const cx = (p1.x + p2.x) / 2;
+        const cy = (p1.y + p2.y) / 2;
+        const radX = Math.max(4, Math.abs(p2.x - p1.x) / 2);
+        const radY = Math.max(4, Math.abs(p2.y - p1.y) / 2);
+
+        ctx.fillStyle = stroke.color + '26';
+        ctx.strokeStyle = stroke.color;
+        ctx.lineWidth = stroke.strokeWidth || 3;
+        ctx.shadowColor = stroke.color;
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.ellipse(cx, cy, radX, radY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+    } else if (stroke.tool === 'arrow') {
+      if (stroke.points.length >= 2) {
+        const from = stroke.points[0];
+        const to = stroke.points[stroke.points.length - 1];
+        const headlen = Math.max(16, (stroke.strokeWidth || 4) * 3.5);
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const angle = Math.atan2(dy, dx);
+
+        ctx.strokeStyle = stroke.color;
+        ctx.fillStyle = stroke.color;
+        ctx.lineWidth = stroke.strokeWidth || 4;
+        ctx.lineCap = 'round';
+        ctx.shadowColor = stroke.color;
+        ctx.shadowBlur = 8;
+
+        // Draw shaft
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.stroke();
+
+        // Draw arrow head
+        ctx.beginPath();
+        ctx.moveTo(to.x, to.y);
+        ctx.lineTo(
+          to.x - headlen * Math.cos(angle - Math.PI / 6),
+          to.y - headlen * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+          to.x - headlen * Math.cos(angle + Math.PI / 6),
+          to.y - headlen * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    ctx.restore();
+  };
+
+
+
 
   // Subscribe to TTS
   useEffect(() => {
@@ -165,16 +562,28 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     });
   }, []);
 
-  // Timer counter when recording
+  // Timer counter when recording & periodic GIF keyframe sampler
   useEffect(() => {
     let interval: number;
     if (isRecording && !isPaused) {
       interval = window.setInterval(() => {
         setRecordingSeconds((prev) => prev + 1);
+
+        // Periodically capture keyframes for instant GIF compilation
+        if (canvasRef.current && sampledGifFramesRef.current.length < 24) {
+          const sample = sampleCanvasFrame(
+            canvasRef.current,
+            360,
+            Math.max(180, Math.round(360 * (activeAspectRatio.height / activeAspectRatio.width)))
+          );
+          if (sample) {
+            sampledGifFramesRef.current.push(sample);
+          }
+        }
       }, 1000);
     }
     return () => clearInterval(interval);
-  }, [isRecording, isPaused, setRecordingSeconds]);
+  }, [isRecording, isPaused, setRecordingSeconds, activeAspectRatio]);
 
   // Real-time canvas animation loop (Compositing Video/IDE base, Color Filter LUT, Ripples, Cursor Halo, Softsubs, Timer Overlay)
   useEffect(() => {
@@ -206,7 +615,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         ctx.fillRect(0, 0, canvas.width, canvas.height);
 
         // Window Frame
-        const pad = 24;
+        const pad = Math.min(24, Math.floor(canvas.width * 0.02));
         const winW = canvas.width - pad * 2;
         const winH = canvas.height - pad * 2;
 
@@ -239,24 +648,33 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         // Title
         ctx.font = '600 13px "JetBrains Mono", monospace';
         ctx.fillStyle = '#a1a1aa';
-        ctx.fillText('KBT CloudIDE Simulator — Multi-Language Architecture Engine', pad + 78, pad + 25);
+        const titleText =
+          canvas.width < 1200
+            ? 'KBT CloudIDE Simulator'
+            : 'KBT CloudIDE Simulator — Multi-Language Architecture Engine';
+        ctx.fillText(titleText, pad + 78, pad + 25);
 
-        // Active LUT banner in header
+        // Active Aspect Ratio & LUT banner in header
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.textAlign = 'right';
+        let rightOffset = 20;
         if (activeFilter.id !== 'none') {
-          ctx.font = '700 11px "JetBrains Mono", monospace';
           ctx.fillStyle = '#c084fc';
-          ctx.textAlign = 'right';
-          ctx.fillText(`LUT: [${activeFilter.name.toUpperCase()}]`, pad + winW - 20, pad + 25);
-          ctx.textAlign = 'left';
+          ctx.fillText(`LUT: [${activeFilter.name.toUpperCase()}]`, pad + winW - rightOffset, pad + 25);
+          rightOffset += 160;
         }
+        ctx.fillStyle = '#818cf8';
+        ctx.fillText(`[${activeAspectRatio.id} • ${activeAspectRatio.platform}]`, pad + winW - rightOffset, pad + 25);
+        ctx.textAlign = 'left';
 
         // Sidebar
+        const sidebarW = canvas.width < 1200 ? 170 : 200;
         ctx.fillStyle = '#121318';
-        ctx.fillRect(pad + 1, pad + 41, 200, winH - 42);
+        ctx.fillRect(pad + 1, pad + 41, sidebarW, winH - 42);
         ctx.strokeStyle = '#27272a';
         ctx.beginPath();
-        ctx.moveTo(pad + 201, pad + 41);
-        ctx.lineTo(pad + 201, pad + winH);
+        ctx.moveTo(pad + sidebarW + 1, pad + 41);
+        ctx.lineTo(pad + sidebarW + 1, pad + winH);
         ctx.stroke();
 
         ctx.font = '600 11px "JetBrains Mono", monospace';
@@ -272,12 +690,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         ];
         files.forEach((f, fi) => {
           ctx.fillStyle = fi === 0 ? '#818cf8' : '#a1a1aa';
-          ctx.fillText(f, pad + 20, pad + 95 + fi * 26);
+          ctx.fillText(f, pad + 16, pad + 95 + fi * 26);
         });
 
         // Editor code area
+        const terminalH = canvas.height > 1400 ? 260 : 140;
         ctx.fillStyle = '#0d0e12';
-        ctx.fillRect(pad + 202, pad + 41, winW - 203, winH - 180);
+        ctx.fillRect(pad + sidebarW + 2, pad + 41, winW - sidebarW - 3, winH - terminalH - 42);
 
         const codeSnippets = [
           '// High-Performance Architectural Engine SIMD Kernel',
@@ -296,7 +715,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         ctx.font = '12px "JetBrains Mono", monospace';
         codeSnippets.forEach((line, li) => {
           ctx.fillStyle = '#52525b';
-          ctx.fillText(String(li + 1).padStart(2, '0'), pad + 218, pad + 72 + li * 22);
+          ctx.fillText(String(li + 1).padStart(2, '0'), pad + sidebarW + 18, pad + 72 + li * 22);
           ctx.fillStyle =
             line.startsWith('//')
               ? '#71717a'
@@ -307,29 +726,33 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               : line.includes('_mm256')
               ? '#34d399'
               : '#e4e4e7';
-          ctx.fillText(line, pad + 250, pad + 72 + li * 22);
+          ctx.fillText(line, pad + sidebarW + 50, pad + 72 + li * 22);
         });
 
         // Terminal pane
         ctx.fillStyle = '#090a0f';
-        ctx.fillRect(pad + 202, pad + winH - 140, winW - 203, 138);
+        ctx.fillRect(pad + sidebarW + 2, pad + winH - terminalH, winW - sidebarW - 3, terminalH);
         ctx.strokeStyle = '#27272a';
         ctx.beginPath();
-        ctx.moveTo(pad + 202, pad + winH - 140);
-        ctx.lineTo(pad + winW, pad + winH - 140);
+        ctx.moveTo(pad + sidebarW + 2, pad + winH - terminalH);
+        ctx.lineTo(pad + winW, pad + winH - terminalH);
         ctx.stroke();
 
         ctx.font = '600 11px "JetBrains Mono", monospace';
         ctx.fillStyle = '#38bdf8';
-        ctx.fillText('TERMINAL : KBT COMPILER & RUNTIME v2.4 [60 FPS COMPOSITOR]', pad + 218, pad + winH - 118);
+        ctx.fillText(
+          `TERMINAL : KBT COMPILER [${activeAspectRatio.id} ${activeAspectRatio.width}×${activeAspectRatio.height}]`,
+          pad + sidebarW + 18,
+          pad + winH - terminalH + 24
+        );
 
         ctx.font = '11px "JetBrains Mono", monospace';
         ctx.fillStyle = '#4ade80';
-        ctx.fillText('[OK] Real-time Canvas Capture Stream Initialized.', pad + 218, pad + winH - 96);
+        ctx.fillText('[OK] Real-time Canvas Capture Stream Initialized.', pad + sidebarW + 18, pad + winH - terminalH + 46);
         ctx.fillStyle = '#e4e4e7';
-        ctx.fillText(`[LUT] Active Color-Correction Filter: ${activeFilter.name}`, pad + 218, pad + winH - 74);
+        ctx.fillText(`[LUT] Active Color-Correction Filter: ${activeFilter.name}`, pad + sidebarW + 18, pad + winH - terminalH + 68);
         ctx.fillStyle = '#94a3b8';
-        ctx.fillText(`[STATUS] ${isRecording ? (isPaused ? 'PAUSED' : 'ENCODING TO STREAM...') : 'STANDBY READY'} | Cycle with 'F'`, pad + 218, pad + winH - 52);
+        ctx.fillText(`[TARGET] Formatted for ${activeAspectRatio.platform} (${activeAspectRatio.label})`, pad + sidebarW + 18, pad + winH - terminalH + 90);
       }
       ctx.restore();
 
@@ -382,7 +805,14 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       ctx.fill();
       ctx.restore();
 
+      // 2.5 Real-Time Screen Drawing & Highlight Annotations Layer
+      strokesRef.current.forEach((strk) => renderDrawingStroke(ctx, strk));
+      if (currentStrokeRef.current) {
+        renderDrawingStroke(ctx, currentStrokeRef.current);
+      }
+
       // 3. Render active softsub caption if enabled and cue is matching recordingSeconds
+
       if (showAnnotations && annotationMode === 'softsubs' && cues.length > 0) {
         const currentTime = isRecording ? recordingSeconds : (Date.now() / 1000) % 15;
         const activeCue = cues.find((c) => currentTime >= c.startTime && currentTime <= c.endTime) || cues[0];
@@ -458,46 +888,41 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           ctx.shadowColor = dotColor;
           ctx.shadowBlur = 8;
         } else {
-          ctx.fillStyle = idleDotColor;
-          ctx.shadowColor = idleDotColor;
+          const dotColor = recordingSeconds > 0 ? '#818cf8' : idleDotColor;
+          ctx.fillStyle = dotColor;
+          ctx.shadowColor = dotColor;
           ctx.shadowBlur = 4;
         }
         ctx.fill();
         ctx.shadowBlur = 0;
 
-        // Recording Timer / Clock text
+        // Recording Timer / Total Video Length Duration counter
         ctx.font = `${fontWeight} ${fontSize} ${fontFamily}`;
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
 
         let timerText = '';
         if (isRecording) {
-          const m = Math.floor(recordingSeconds / 60);
-          const s = recordingSeconds % 60;
           const status = isPaused ? 'PAUSE' : 'REC';
-          timerText = `${status} ${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          timerText = `${status} ${formatDisplayDuration(recordingSeconds)}`;
+        } else if (recordingSeconds > 0) {
+          timerText = `LENGTH ${formatDisplayDuration(recordingSeconds)}`;
         } else {
-          const now = new Date();
-          const timeStr = now.toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-            hour12: false,
-          });
-          timerText = `LIVE ${timeStr}`;
+          timerText = `DURATION 00:00`;
         }
 
-        ctx.fillStyle = isRecording ? (isPaused ? '#fbbf24' : '#ffffff') : '#e4e4e7';
+        ctx.fillStyle = isRecording ? (isPaused ? '#fbbf24' : '#ffffff') : recordingSeconds > 0 ? '#ffffff' : '#e4e4e7';
         ctx.fillText(timerText, x + 28, y + height / 2);
 
         // Framerate indicator tag
         ctx.font = `600 10px ${fontFamily}`;
         ctx.textAlign = 'right';
         ctx.fillStyle = '#a1a1aa';
-        ctx.fillText(`${exportFramerate}FPS`, x + width - 10, y + height / 2);
+        ctx.fillText(`${exportFramerate}FPS`, x + width - 12, y + height / 2);
 
         ctx.restore();
       }
+
 
       // 5. Active Color Filter / LUT Status Overlay Badge
       if (activeFilter.id !== 'none') {
@@ -558,6 +983,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     activeFilter,
     usePixelLutEngine,
     captureSource,
+    selectedAspectRatio,
+    activeAspectRatio,
   ]);
 
   // Initialize Camera stream if enabled
@@ -679,6 +1106,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   // Record Lifecycle Controls
   const handleStartRecording = () => {
     recordedChunksRef.current = [];
+    recordedBlobRef.current = null;
+    sampledGifFramesRef.current = [];
     setRecordedVideoUrl(null);
     setRecordingSeconds(0);
     setIsRecording(true);
@@ -688,6 +1117,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     const interval = window.setInterval(() => {
       setAudioLevel(0.3 + Math.random() * 0.5);
     }, 150);
+
+    // Initial frame sampling for GIF loop
+    if (canvasRef.current) {
+      const initialFrame = sampleCanvasFrame(
+        canvasRef.current,
+        360,
+        Math.max(180, Math.round(360 * (activeAspectRatio.height / activeAspectRatio.width)))
+      );
+      if (initialFrame) {
+        sampledGifFramesRef.current.push(initialFrame);
+      }
+    }
 
     // If canvas stream can be captured:
     const canvas = canvasRef.current;
@@ -710,6 +1151,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           clearInterval(interval);
           setAudioLevel(0);
           const blob = new Blob(recordedChunksRef.current, { type: 'video/webm' });
+          recordedBlobRef.current = blob;
           const url = URL.createObjectURL(blob);
           setRecordedVideoUrl(url);
         };
@@ -739,26 +1181,181 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       mediaRecorderRef.current.stop();
     }
+
+    // Capture final ending frame for GIF animation
+    if (canvasRef.current && sampledGifFramesRef.current.length < 24) {
+      const finalFrame = sampleCanvasFrame(
+        canvasRef.current,
+        360,
+        Math.max(180, Math.round(360 * (activeAspectRatio.height / activeAspectRatio.width)))
+      );
+      if (finalFrame) {
+        sampledGifFramesRef.current.push(finalFrame);
+      }
+    }
   };
 
-  // Export video file
-  const handleExportVideo = (format: 'mp4' | 'webm') => {
+  // Build standardized companion metadata manifest JSON
+  const buildMetadataManifest = (formatOverride?: ExportFormatId): ProjectRecordingMetadata => {
+    const format = formatOverride || selectedExportFormat;
+    const m = Math.floor(recordingSeconds / 60);
+    const s = recordingSeconds % 60;
+    return {
+      projectTitle: projectTitle.trim() || 'Untitled Tutorial Recording',
+      projectDescription: projectDescription.trim(),
+      recordedAt: new Date().toISOString(),
+      durationSeconds: recordingSeconds,
+      formattedDuration: `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+      language: selectedLanguage,
+      languageName: LANGUAGE_MAP[selectedLanguage]?.name || selectedLanguage,
+      aspectRatio: selectedAspectRatio,
+      resolution: {
+        width: activeAspectRatio.width,
+        height: activeAspectRatio.height,
+      },
+      exportFormat: format,
+      framerate: exportFramerate,
+      quality: exportQuality,
+      colorFilter: selectedFilter,
+      interactiveWorkflowStepsCount: scribeSteps.length,
+      subtitleCuesCount: cues.length,
+      stepsSummary: scribeSteps.map((st) => ({
+        stepNumber: st.stepNumber,
+        title: st.translations[selectedLanguage]?.title || st.title,
+        actionType: st.actionType,
+        targetElement: st.targetElement,
+        timestamp: st.timestamp,
+      })),
+      subtitlesSummary: cues.map((c) => ({
+        id: c.id,
+        startTime: c.startTime,
+        endTime: c.endTime,
+        speaker: c.speaker,
+        text: c.translations[selectedLanguage] || c.text,
+      })),
+      generator: 'KBT_AppGuideVideo Studio Engine',
+      version: '2.4.0',
+    };
+  };
+
+  // Download standalone project metadata manifest (.json)
+  const handleDownloadMetadata = () => {
+    const ratioTag = activeAspectRatio.id.replace(':', 'x');
+    const timestamp = Date.now();
+    const cleanTitle = sanitizeFileName(projectTitle, 'KBT_Tutorial');
+    const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}_${timestamp}`;
+    const metadata = buildMetadataManifest();
+    const metaJson = generateProjectMetadataJson(metadata);
+    triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
+  };
+
+  // Export video or animation file (MP4, WEBM, GIF)
+  const handleExportVideo = (formatOverride?: ExportFormatId) => {
+    const format = formatOverride || selectedExportFormat;
     setIsExporting(true);
+    setExportStatusText(
+      format === 'gif'
+        ? 'Compiling GIF89a animation loop...'
+        : format === 'webm'
+        ? 'Muxing WebM VP9 stream...'
+        : 'Muxing MP4 H.264 container...'
+    );
+
     setTimeout(() => {
-      setIsExporting(false);
-      if (recordedVideoUrl) {
-        const a = document.createElement('a');
-        a.href = recordedVideoUrl;
-        a.download = `KBT_Tutorial_${selectedLanguage.toUpperCase()}_${Date.now()}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-      } else {
-        // Fallback: Generate simulation container
-        const dummyContent = 'KBT_AppGuideVideo Output Video Container (H.264 / AAC)';
-        triggerDownload(dummyContent, `KBT_Software_Guide_${selectedLanguage.toUpperCase()}.${format}`, 'video/mp4');
+      try {
+        const ratioTag = activeAspectRatio.id.replace(':', 'x');
+        const timestamp = Date.now();
+        const cleanTitle = sanitizeFileName(projectTitle, 'KBT_Tutorial');
+        const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}_${timestamp}`;
+
+        // Save companion metadata manifest (.json) alongside the exported file if enabled
+        if (saveMetadataAlongside) {
+          const metadata = buildMetadataManifest(format);
+          const metaJson = generateProjectMetadataJson(metadata);
+          triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
+        }
+
+        if (format === 'gif') {
+          // Animated GIF compilation
+          let frames = [...sampledGifFramesRef.current];
+          if (frames.length === 0 && canvasRef.current) {
+            const f = sampleCanvasFrame(
+              canvasRef.current,
+              360,
+              Math.max(180, Math.round(360 * (activeAspectRatio.height / activeAspectRatio.width)))
+            );
+            if (f) frames = [f, f];
+          }
+
+          if (frames.length > 0) {
+            const gifBlob = createAnimatedGifBlob(frames, 130);
+            const gifUrl = URL.createObjectURL(gifBlob);
+            const a = document.createElement('a');
+            a.href = gifUrl;
+            a.download = `${baseFileName}.gif`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(gifUrl), 1000);
+          } else {
+            const dummyGif = `GIF89a Animated Graphic Loop (${activeAspectRatio.label})`;
+            triggerDownload(dummyGif, `${baseFileName}.gif`, 'image/gif');
+          }
+        } else if (format === 'webm') {
+          // Native WebM stream
+          if (recordedBlobRef.current) {
+            const webmBlob = new Blob([recordedBlobRef.current], { type: 'video/webm' });
+            const webmUrl = URL.createObjectURL(webmBlob);
+            const a = document.createElement('a');
+            a.href = webmUrl;
+            a.download = `${baseFileName}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(webmUrl), 1000);
+          } else if (recordedVideoUrl) {
+            const a = document.createElement('a');
+            a.href = recordedVideoUrl;
+            a.download = `${baseFileName}.webm`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else {
+            const dummyContent = `KBT_AppGuideVideo WebM Container (${activeAspectRatio.label} VP9 / Opus)`;
+            triggerDownload(dummyContent, `${baseFileName}.webm`, 'video/webm');
+          }
+        } else {
+          // Universal MP4 format
+          if (recordedBlobRef.current) {
+            const mp4Blob = new Blob([recordedBlobRef.current], { type: 'video/mp4' });
+            const mp4Url = URL.createObjectURL(mp4Blob);
+            const a = document.createElement('a');
+            a.href = mp4Url;
+            a.download = `${baseFileName}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(mp4Url), 1000);
+          } else if (recordedVideoUrl) {
+            const a = document.createElement('a');
+            a.href = recordedVideoUrl;
+            a.download = `${baseFileName}.mp4`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          } else {
+            const dummyContent = `KBT_AppGuideVideo MP4 Container (${activeAspectRatio.label} H.264 / AAC)`;
+            triggerDownload(dummyContent, `${baseFileName}.mp4`, 'video/mp4');
+          }
+        }
+      } catch (err) {
+        console.error('Export error:', err);
+      } finally {
+        setIsExporting(false);
+        setExportStatusText('');
       }
     }, 600);
+
   };
 
   // Direct Web Speech API synthesis linking ttsVolume state (0.0 to 1.0)
@@ -879,8 +1476,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         handlePreviewTts();
       } else if (action === 'CYCLE_FILTER') {
         handleCycleFilter();
+      } else if (action === 'TOGGLE_DRAW') {
+        setIsDrawModeActive((prev) => !prev);
       }
     };
+
 
     window.addEventListener('kbt-hotkey', handleCustomHotkey);
     return () => {
@@ -945,6 +1545,26 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             {isMicActive ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
             <span className="hidden sm:inline">Mic Track</span>
           </button>
+
+          {/* Drawing & Screen Highlight Overlay Toggle Button */}
+          <button
+            type="button"
+            id="toolbar-draw-highlight-toggle-btn"
+            onClick={() => setIsDrawModeActive(!isDrawModeActive)}
+            title="Toggle Screen Drawing & Highlighter overlay (Hotkey: D)"
+            className={`p-2 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer ${
+              isDrawModeActive
+                ? 'bg-amber-950/50 text-amber-300 border-amber-500/60 shadow-sm shadow-amber-500/20 ring-1 ring-amber-400/40 font-bold'
+                : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+            }`}
+          >
+            <Highlighter className="w-4 h-4 text-amber-400" />
+            <span className="hidden sm:inline font-semibold">Highlight</span>
+            <kbd className="px-1 py-0.2 rounded text-[9px] bg-zinc-900 text-amber-400 border border-zinc-800 font-bold">
+              D
+            </kbd>
+          </button>
+
 
           {/* Real-time Recording Timer Overlay Checkbox */}
           <label
@@ -1151,6 +1771,63 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             <span>Preview TTS</span>
           </button>
 
+          {/* Video Aspect Ratio Dropdown Selector (16:9, 9:16, 1:1, 4:3) */}
+          <div className="flex items-center gap-1.5 bg-zinc-950 px-2.5 py-1.5 rounded-xl border border-zinc-800 text-xs">
+            {selectedAspectRatio === '16:9' ? (
+              <Monitor className="w-3.5 h-3.5 text-indigo-400" />
+            ) : selectedAspectRatio === '9:16' ? (
+              <Smartphone className="w-3.5 h-3.5 text-indigo-400" />
+            ) : (
+              <Square className="w-3.5 h-3.5 text-indigo-400" />
+            )}
+            <label htmlFor="aspect-ratio-selector" className="text-[10px] text-zinc-400 font-mono hidden xl:inline">
+              Ratio:
+            </label>
+            <select
+              id="aspect-ratio-selector"
+              aria-label="Select Video Aspect Ratio"
+              value={selectedAspectRatio}
+              onChange={(e) => setSelectedAspectRatio(e.target.value as AspectRatioId)}
+              className="bg-transparent text-indigo-300 font-bold focus:outline-none cursor-pointer"
+            >
+              {ASPECT_RATIO_PRESETS.map((ratio) => (
+                <option key={ratio.id} value={ratio.id} className="bg-zinc-900 text-zinc-100">
+                  {ratio.label} — {ratio.platform}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Export Format Selector (MP4, WEBM, GIF) */}
+          <div
+            id="toolbar-export-format-selector"
+            className="flex items-center gap-1.5 bg-zinc-950 px-2.5 py-1.5 rounded-xl border border-zinc-800 text-xs"
+          >
+            {selectedExportFormat === 'gif' ? (
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+            ) : selectedExportFormat === 'webm' ? (
+              <FileVideo className="w-3.5 h-3.5 text-emerald-400" />
+            ) : (
+              <Film className="w-3.5 h-3.5 text-indigo-400" />
+            )}
+            <label htmlFor="export-format-selector" className="text-[10px] text-zinc-400 font-mono hidden xl:inline">
+              Format:
+            </label>
+            <select
+              id="export-format-selector"
+              aria-label="Select Video or Animation Export Format"
+              value={selectedExportFormat}
+              onChange={(e) => setSelectedExportFormat(e.target.value as ExportFormatId)}
+              className="bg-transparent text-indigo-300 font-bold font-mono focus:outline-none cursor-pointer"
+            >
+              {EXPORT_FORMAT_PRESETS.map((fmt) => (
+                <option key={fmt.id} value={fmt.id} className="bg-zinc-900 text-zinc-100 font-sans">
+                  {fmt.label} ({fmt.badge})
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Quality & FPS Selector */}
           <div className="hidden md:flex items-center gap-1.5 bg-zinc-950 px-2.5 py-1.5 rounded-xl border border-zinc-800 text-xs text-zinc-400 font-mono">
             <select
@@ -1181,7 +1858,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           {!isRecording ? (
             <button
               onClick={handleStartRecording}
-              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-red-600/30 transition"
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 active:scale-95 text-white font-bold text-xs shadow-lg shadow-red-600/30 transition cursor-pointer"
             >
               <Circle className="w-3.5 h-3.5 fill-current" />
               <span>Start Recording</span>
@@ -1190,31 +1867,91 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             <div className="flex items-center gap-2">
               <button
                 onClick={handlePauseRecording}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs transition cursor-pointer"
               >
                 {isPaused ? <Play className="w-3.5 h-3.5 fill-current" /> : <Pause className="w-3.5 h-3.5 fill-current" />}
                 <span>{isPaused ? 'Resume' : 'Pause'}</span>
               </button>
 
               <button
+                id="stop-and-export-btn"
                 onClick={handleStopRecording}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-red-400 font-bold text-xs border border-red-500/30 shadow-md transition"
+                title={`Stop recording & export project "${projectTitle || 'Untitled'}"`}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-red-400 font-bold text-xs border border-red-500/30 shadow-md transition cursor-pointer"
               >
                 <Square className="w-3.5 h-3.5 fill-current" />
                 <span>Stop & Export</span>
               </button>
+
             </div>
           )}
 
-          {/* Export MP4 Button */}
+          {/* Dynamic Export Button for Selected Format (MP4 / WEBM / GIF) */}
           <button
-            onClick={() => handleExportVideo('mp4')}
+            id="export-video-format-btn"
+            type="button"
+            onClick={() => handleExportVideo()}
             disabled={isExporting}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs shadow-md transition disabled:opacity-50"
+            className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl active:scale-95 text-white font-bold text-xs shadow-md transition disabled:opacity-50 cursor-pointer ${
+              selectedExportFormat === 'gif'
+                ? 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/25'
+                : selectedExportFormat === 'webm'
+                ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/25'
+                : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/25'
+            }`}
+            title={`Export recording as ${activeExportFormat.name}`}
           >
             <Download className="w-3.5 h-3.5" />
-            <span>{isExporting ? 'Muxing MP4...' : 'Export MP4'}</span>
+            <span>
+              {isExporting
+                ? exportStatusText || `Exporting ${selectedExportFormat.toUpperCase()}...`
+                : `Export ${selectedExportFormat.toUpperCase()}`}
+            </span>
           </button>
+        </div>
+      </div>
+
+      {/* Target Platform Aspect Ratio Quick Selector Strip */}
+      <div className="flex items-center justify-between flex-wrap gap-2 py-1.5 px-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-xs">
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <span className="text-[11px] font-mono font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+            <Tv className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Target Platform:</span>
+          </span>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {ASPECT_RATIO_PRESETS.map((ratio) => (
+              <button
+                key={ratio.id}
+                type="button"
+                id={`aspect-ratio-btn-${ratio.id.replace(':', '-')}`}
+                onClick={() => setSelectedAspectRatio(ratio.id)}
+                title={`${ratio.name} — ${ratio.description}`}
+                className={`aspect-ratio-preset-pill px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                  selectedAspectRatio === ratio.id
+                    ? 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400 font-semibold'
+                    : 'bg-zinc-950/90 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800/80'
+                }`}
+              >
+                {ratio.id === '16:9' ? (
+                  <Monitor className="w-3 h-3" />
+                ) : ratio.id === '9:16' ? (
+                  <Smartphone className="w-3 h-3" />
+                ) : (
+                  <Square className="w-3 h-3" />
+                )}
+                <span>{ratio.label}</span>
+                <span className="text-[10px] opacity-75 font-mono">
+                  ({ratio.platform.split(',')[0].split('&')[0].trim()})
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono text-zinc-400">
+          <span className="text-zinc-500">Output:</span>
+          <span className="text-indigo-300 font-bold">{activeAspectRatio.width}×{activeAspectRatio.height}</span>
+          <span className="text-zinc-600">•</span>
+          <span className="text-zinc-400">{activeAspectRatio.platform}</span>
         </div>
       </div>
 
@@ -1244,8 +1981,518 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         </div>
       </div>
 
+      {/* Export Format Quick Selector Strip (MP4, WEBM, GIF) */}
+      <div
+        id="export-format-selector-strip"
+        className="flex items-center justify-between flex-wrap gap-2 py-1.5 px-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-xs"
+      >
+        <div className="flex items-center gap-2 overflow-x-auto">
+          <span className="text-[11px] font-mono font-semibold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5 shrink-0">
+            <Film className="w-3.5 h-3.5 text-purple-400" />
+            <span>Export Format:</span>
+          </span>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+            {EXPORT_FORMAT_PRESETS.map((fmt) => (
+              <button
+                key={fmt.id}
+                type="button"
+                id={`export-format-btn-${fmt.id}`}
+                onClick={() => setSelectedExportFormat(fmt.id)}
+                title={`${fmt.name} — ${fmt.description}`}
+                className={`export-format-preset-pill px-2.5 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                  selectedExportFormat === fmt.id
+                    ? fmt.id === 'gif'
+                      ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-400 font-semibold'
+                      : fmt.id === 'webm'
+                      ? 'bg-emerald-600 text-white shadow-sm ring-1 ring-emerald-400 font-semibold'
+                      : 'bg-indigo-600 text-white shadow-sm ring-1 ring-indigo-400 font-semibold'
+                    : 'bg-zinc-950/90 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 border border-zinc-800/80'
+                }`}
+              >
+                {fmt.id === 'gif' ? (
+                  <Sparkles className="w-3 h-3" />
+                ) : fmt.id === 'webm' ? (
+                  <FileVideo className="w-3 h-3" />
+                ) : (
+                  <Film className="w-3 h-3" />
+                )}
+                <span className="font-mono font-bold uppercase">{fmt.id}</span>
+                <span className="text-[10px] opacity-75 font-mono">({fmt.badge})</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="hidden sm:flex items-center gap-2 text-[11px] font-mono text-zinc-400">
+          <span className="text-zinc-500">Output:</span>
+          <span className="text-white font-bold font-mono">.{activeExportFormat.extension}</span>
+          <span className="text-zinc-600">•</span>
+          <span className="text-indigo-300">{activeExportFormat.recommendedFor}</span>
+        </div>
+      </div>
+
+      {/* Project Details & Metadata Configuration (Accessible before and during recording) */}
+      <div
+        id="project-metadata-deck"
+        className={`p-3.5 sm:p-4 rounded-2xl transition-all duration-200 border ${
+          isRecording
+            ? 'bg-gradient-to-r from-red-950/40 via-zinc-950 to-indigo-950/40 border-red-500/60 shadow-lg shadow-red-950/40 ring-1 ring-red-500/30'
+            : 'bg-zinc-900/80 border-zinc-800 shadow-sm'
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pb-2.5 border-b border-zinc-800/80">
+          <div className="flex items-center gap-2.5">
+            <div
+              className={`flex items-center justify-center w-7 h-7 rounded-lg ${
+                isRecording
+                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                  : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/30'
+              }`}
+            >
+              <Tag className="w-3.5 h-3.5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h4 className="font-bold text-xs text-white">Project Details & Export Metadata</h4>
+                {isRecording ? (
+                  <span className="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold font-mono bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-ping" />
+                    Recording in Progress: You can edit Title & Description before hitting Stop & Export!
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono text-zinc-400 bg-zinc-950 border border-zinc-800">
+                    Saved in filename & companion metadata manifest (.json)
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Auto-Save Status Indicator */}
+            <div
+              id="auto-save-indicator"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[11px] font-mono border transition-all duration-300 ${
+                autoSavePulse
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-sm shadow-emerald-500/20'
+                  : 'bg-zinc-950 text-zinc-400 border-zinc-800'
+              }`}
+              title="Project title, description, and export settings are continuously auto-saved to local storage"
+            >
+              <HardDrive className={`w-3 h-3 ${autoSavePulse ? 'text-emerald-400 animate-pulse' : 'text-zinc-500'}`} />
+              <span>
+                {autoSavePulse
+                  ? 'Saved to LocalStorage'
+                  : lastAutoSavedTime
+                  ? `Saved ${lastAutoSavedTime}`
+                  : 'Auto-save active'}
+              </span>
+              {autoSavePulse && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              )}
+            </div>
+
+            {/* Toggle Companion Metadata Manifest */}
+            <label
+              htmlFor="save-metadata-toggle"
+              className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-zinc-950 border border-zinc-800 text-xs text-zinc-300 hover:text-white cursor-pointer select-none transition"
+              title="When checked, a companion .json manifest will be exported alongside your video file"
+            >
+              <input
+                id="save-metadata-toggle"
+                type="checkbox"
+                checked={saveMetadataAlongside}
+                onChange={(e) => setSaveMetadataAlongside(e.target.checked)}
+                className="rounded bg-zinc-800 border-zinc-700 text-indigo-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer accent-indigo-500"
+              />
+              <FileJson className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="text-[11px] font-medium">Save metadata manifest (.json)</span>
+            </label>
+
+            {/* Quick Collapse/Expand Toggle */}
+            <button
+              type="button"
+              onClick={() => setShowProjectMetaEditor(!showProjectMetaEditor)}
+              className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded-lg hover:bg-zinc-800 transition cursor-pointer font-mono"
+            >
+              {showProjectMetaEditor ? 'Collapse ▲' : 'Edit Details ▼'}
+            </button>
+          </div>
+        </div>
+
+        {showProjectMetaEditor && (
+          <div className="pt-3 space-y-3">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+              {/* Project Title Input */}
+              <div className="md:col-span-5 space-y-1">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="project-title-input"
+                    className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5"
+                  >
+                    <Tag className="w-3 h-3 text-indigo-400" />
+                    <span>Project Title</span>
+                  </label>
+                  <span className="text-[10px] font-mono text-zinc-500">
+                    {projectTitle.length} chars
+                  </span>
+                </div>
+                <input
+                  id="project-title-input"
+                  type="text"
+                  value={projectTitle}
+                  onChange={(e) => setProjectTitle(e.target.value)}
+                  placeholder="e.g., Full-Stack System Architecture Tutorial"
+                  className="w-full px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-zinc-600 text-xs font-medium transition"
+                />
+              </div>
+
+              {/* Project Description Input */}
+              <div className="md:col-span-7 space-y-1">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="project-description-input"
+                    className="text-[11px] font-semibold text-zinc-300 flex items-center gap-1.5"
+                  >
+                    <FileText className="w-3 h-3 text-indigo-400" />
+                    <span>Project Description & Context</span>
+                  </label>
+                  <span className="text-[10px] font-mono text-zinc-500">
+                    {projectDescription.length} chars
+                  </span>
+                </div>
+                <input
+                  id="project-description-input"
+                  type="text"
+                  value={projectDescription}
+                  onChange={(e) => setProjectDescription(e.target.value)}
+                  placeholder="e.g., Interactive walkthrough of distributed message queues, latency graphs, and SIMD telemetry..."
+                  className="w-full px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-800 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-white placeholder-zinc-600 text-xs transition"
+                />
+              </div>
+            </div>
+
+            {/* Quick Templates & Filename Preview Strip */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-zinc-400">
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                <span className="text-[10px] font-mono uppercase text-zinc-500 shrink-0">
+                  Quick Presets:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectTitle('Full-Stack Distributed System Architecture');
+                    setProjectDescription(
+                      'Comprehensive walkthrough of cloud infrastructure, distributed telemetry, and high-performance kernel routines.'
+                    );
+                  }}
+                  className="px-2 py-0.5 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] text-zinc-300 transition shrink-0 cursor-pointer"
+                >
+                  Architecture
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectTitle('API Gateway & Microservices Guide');
+                    setProjectDescription(
+                      'End-to-end tutorial covering token authorization, request multiplexing, and low-latency database queries.'
+                    );
+                  }}
+                  className="px-2 py-0.5 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] text-zinc-300 transition shrink-0 cursor-pointer"
+                >
+                  API Gateway
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectTitle('Real-Time Database Optimization & SQL');
+                    setProjectDescription(
+                      'Deep dive into query profiling, index optimization, and connection pool management.'
+                    );
+                  }}
+                  className="px-2 py-0.5 rounded bg-zinc-950 hover:bg-zinc-800 border border-zinc-800 text-[10px] text-zinc-300 transition shrink-0 cursor-pointer"
+                >
+                  Database SQL
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectTitle('');
+                    setProjectDescription('');
+                  }}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 underline pl-1 cursor-pointer"
+                >
+                  Clear
+                </button>
+                <span className="text-zinc-700">|</span>
+                <button
+                  type="button"
+                  onClick={handleResetSavedSettings}
+                  title="Reset project title, description, and export settings to factory defaults and clear local storage"
+                  className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-amber-300 transition pl-0.5 cursor-pointer font-mono"
+                >
+                  <RotateCcw className="w-2.5 h-2.5" />
+                  <span>Reset Saved Settings</span>
+                </button>
+              </div>
+
+
+              {/* Filename Preview */}
+              <div className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-400 truncate max-w-full">
+                <span className="text-zinc-500">Export Target:</span>
+                <span className="text-indigo-300 font-semibold truncate">
+                  {sanitizeFileName(projectTitle, 'KBT_Tutorial')}_{selectedLanguage.toUpperCase()}_{activeAspectRatio.id.replace(':', 'x')}_[timestamp].{activeExportFormat.extension}
+                </span>
+                {saveMetadataAlongside && (
+                  <span className="text-purple-300 font-medium">
+                    + _metadata.json
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Post-Recording Export Hub (Displayed when a recording is ready) */}
+      {recordedVideoUrl && (
+        <div
+
+          id="post-recording-export-hub"
+          className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-zinc-950 via-zinc-900 to-indigo-950/40 border-2 border-indigo-500/50 shadow-2xl space-y-4 animate-in slide-in-from-top-4 duration-300"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                <Check className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                  <span>Recording Finished — Choose Your Export Format</span>
+                  <span className="text-[10px] uppercase font-bold font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Ready
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-400">
+                  Select your preferred container format (MP4, WEBM, or GIF) and download your tutorial output.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setRecordedVideoUrl(null)}
+                className="text-zinc-400 hover:text-zinc-200 px-2.5 py-1 rounded-lg text-xs hover:bg-zinc-800 transition cursor-pointer"
+                title="Dismiss export preview"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
+            {/* Video Player Preview */}
+            <div className="lg:col-span-5 bg-zinc-950 rounded-xl border border-zinc-800 p-2 overflow-hidden flex flex-col items-center">
+              <video
+                src={recordedVideoUrl}
+                controls
+                autoPlay
+                loop
+                muted
+                className="w-full max-h-48 rounded-lg object-contain bg-black"
+              />
+              <div className="w-full flex items-center justify-between px-2 pt-2 text-[11px] font-mono text-zinc-400">
+                <span>{activeAspectRatio.label}</span>
+                <span>{activeAspectRatio.width}×{activeAspectRatio.height}</span>
+                <span className="text-emerald-400 font-bold">{exportFramerate} FPS</span>
+              </div>
+            </div>
+
+            {/* Export Format Selector Cards (MP4, WEBM, GIF) */}
+            <div className="lg:col-span-7 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                {EXPORT_FORMAT_PRESETS.map((fmt) => {
+                  const isSelected = selectedExportFormat === fmt.id;
+                  return (
+                    <div
+                      key={fmt.id}
+                      id={`export-format-card-${fmt.id}`}
+                      onClick={() => setSelectedExportFormat(fmt.id)}
+                      className={`p-3 rounded-xl border transition cursor-pointer relative flex flex-col justify-between ${
+                        isSelected
+                          ? fmt.id === 'gif'
+                            ? 'bg-purple-950/40 border-purple-500 ring-2 ring-purple-500/30 text-white'
+                            : fmt.id === 'webm'
+                            ? 'bg-emerald-950/40 border-emerald-500 ring-2 ring-emerald-500/30 text-white'
+                            : 'bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/30 text-white'
+                          : 'bg-zinc-950/80 border-zinc-800 hover:border-zinc-700 text-zinc-300'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5">
+                          <span className="font-mono text-xs font-black tracking-wider uppercase flex items-center gap-1.5">
+                            {fmt.id === 'gif' ? (
+                              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+                            ) : fmt.id === 'webm' ? (
+                              <FileVideo className="w-3.5 h-3.5 text-emerald-400" />
+                            ) : (
+                              <Film className="w-3.5 h-3.5 text-indigo-400" />
+                            )}
+                            {fmt.id.toUpperCase()}
+                          </span>
+                          <span
+                            className={`text-[9px] font-bold px-1.5 py-0.5 rounded font-mono ${
+                              isSelected
+                                ? 'bg-white/20 text-white'
+                                : 'bg-zinc-900 text-zinc-400 border border-zinc-800'
+                            }`}
+                          >
+                            .{fmt.extension}
+                          </span>
+                        </div>
+                        <p className="text-[11px] leading-snug line-clamp-2 text-zinc-300 mb-1">
+                          {fmt.description}
+                        </p>
+                      </div>
+                      <div className="pt-2 border-t border-white/10 text-[10px] font-mono text-zinc-400 flex items-center justify-between">
+                        <span>{fmt.badge}</span>
+                        {isSelected && <Check className="w-3 h-3 text-emerald-400" />}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Post-Recording Project Title & Description Final Verification */}
+              <div className="p-3 rounded-xl bg-zinc-950/90 border border-zinc-800 space-y-2">
+                <div className="flex items-center justify-between text-xs flex-wrap gap-2">
+                  <span className="font-semibold text-zinc-300 flex items-center gap-1.5">
+                    <Tag className="w-3.5 h-3.5 text-indigo-400" />
+                    <span>Project Metadata (Saved in File & .JSON Manifest)</span>
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="flex items-center gap-1 text-[10px] font-mono text-zinc-400" title="Changes auto-save to local storage">
+                      <HardDrive className={`w-3 h-3 ${autoSavePulse ? 'text-emerald-400 animate-pulse' : 'text-zinc-500'}`} />
+                      <span>{autoSavePulse ? 'Saved' : lastAutoSavedTime ? `Saved ${lastAutoSavedTime}` : 'Auto-save'}</span>
+                    </span>
+                    <label className="flex items-center gap-1.5 text-[11px] text-zinc-400 hover:text-white cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={saveMetadataAlongside}
+                        onChange={(e) => setSaveMetadataAlongside(e.target.checked)}
+                        className="rounded bg-zinc-800 border-zinc-700 text-indigo-500 w-3 h-3 accent-indigo-500 cursor-pointer"
+                      />
+                      <span>Include companion .json manifest</span>
+                    </label>
+                  </div>
+                </div>
+
+
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
+                  <div className="sm:col-span-5">
+                    <input
+                      type="text"
+                      value={projectTitle}
+                      onChange={(e) => setProjectTitle(e.target.value)}
+                      placeholder="Project title..."
+                      aria-label="Post-recording Project Title"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 focus:border-indigo-500 text-white text-xs font-semibold"
+                    />
+                  </div>
+                  <div className="sm:col-span-7">
+                    <input
+                      type="text"
+                      value={projectDescription}
+                      onChange={(e) => setProjectDescription(e.target.value)}
+                      placeholder="Project description notes..."
+                      aria-label="Post-recording Project Description"
+                      className="w-full px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 focus:border-indigo-500 text-zinc-300 text-xs"
+                    />
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-mono text-zinc-400 truncate flex items-center gap-2">
+                  <span className="text-zinc-500">Target Filename:</span>
+                  <span className="text-indigo-300 font-bold truncate">
+                    {sanitizeFileName(projectTitle, 'KBT_Tutorial')}_{selectedLanguage.toUpperCase()}_{activeAspectRatio.id.replace(':', 'x')}_[timestamp].{activeExportFormat.extension}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons for Export */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                <div className="text-xs text-zinc-400">
+                  Target: <strong className="text-white font-mono">{activeExportFormat.recommendedFor}</strong>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Download Video / GIF */}
+                  <button
+                    type="button"
+                    id="post-record-download-btn"
+                    onClick={() => handleExportVideo()}
+                    disabled={isExporting}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-xs shadow-lg transition active:scale-95 disabled:opacity-50 cursor-pointer ${
+                      selectedExportFormat === 'gif'
+                        ? 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
+                        : selectedExportFormat === 'webm'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                        : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
+                    }`}
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      {isExporting
+                        ? exportStatusText || 'Packaging file...'
+                        : `Download .${activeExportFormat.extension.toUpperCase()}${saveMetadataAlongside ? ' + Metadata' : ''}`}
+                    </span>
+                  </button>
+
+                  {/* Standalone Metadata (.json) Button */}
+                  <button
+                    type="button"
+                    id="post-record-download-metadata-btn"
+                    onClick={handleDownloadMetadata}
+                    title="Download companion project metadata manifest as formatted JSON"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 hover:border-purple-500/50 border border-zinc-800 text-purple-300 hover:text-white text-xs font-semibold transition cursor-pointer"
+                  >
+                    <FileJson className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Metadata (.json)</span>
+                  </button>
+
+                  {/* Bundle All Button */}
+                  <button
+                    type="button"
+                    id="post-record-bundle-all-btn"
+                    onClick={() => {
+                      handleExportVideo();
+                      const metadata = buildMetadataManifest();
+                      const metaJson = generateProjectMetadataJson(metadata);
+                      const cleanTitle = sanitizeFileName(projectTitle, 'KBT_Tutorial');
+                      const ratioTag = activeAspectRatio.id.replace(':', 'x');
+                      const timestamp = Date.now();
+                      const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}_${timestamp}`;
+                      triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
+                      const vtt = generateWebVTT(cues, selectedLanguage);
+                      triggerDownload(vtt, `${baseFileName}_captions_${selectedLanguage.toUpperCase()}.vtt`, 'text/vtt');
+                    }}
+                    title="Export video, metadata JSON manifest, and timed subtitle track together"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-850 hover:border-indigo-500/50 border border-zinc-800 text-zinc-200 hover:text-white text-xs font-semibold transition cursor-pointer"
+                  >
+                    <FolderArchive className="w-3.5 h-3.5 text-indigo-400" />
+                    <span className="hidden sm:inline">Bundle All (Video + Metadata + VTT)</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Studio Viewport (Recording Screen + Draggable Webcam + Canvas Overlay) */}
-      <div className="relative w-full aspect-video min-h-[480px] bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden shadow-2xl flex flex-col justify-center items-center">
+      <div className={`relative transition-all duration-300 ${activeAspectRatio.aspectClass} min-h-[360px] max-h-[820px] bg-zinc-950 rounded-2xl border border-zinc-800 overflow-hidden shadow-2xl flex flex-col justify-center items-center`}>
         {/* If using the interactive simulator */}
         {captureSource === 'simulator' ? (
           <div
@@ -1285,12 +2532,88 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           </div>
         )}
 
+        {/* Persistent Duration Counter on Recording Canvas Area */}
+        <div
+          id="canvas-persistent-duration-counter"
+          className="absolute top-4 left-4 z-30 pointer-events-auto flex items-center gap-2.5 px-3 py-1.5 rounded-xl bg-zinc-950/92 backdrop-blur-md border border-zinc-800 shadow-xl transition-all duration-200 select-none"
+          title={`Total video recording length: ${formatDisplayDuration(recordingSeconds)}`}
+        >
+          {/* Status Dot */}
+          <div className="relative flex items-center justify-center">
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                isRecording
+                  ? isPaused
+                    ? 'bg-amber-400'
+                    : 'bg-red-500 animate-ping'
+                  : recordingSeconds > 0
+                  ? 'bg-indigo-400'
+                  : 'bg-emerald-400'
+              }`}
+            />
+            <span
+              className={`absolute w-2 h-2 rounded-full ${
+                isRecording
+                  ? isPaused
+                    ? 'bg-amber-400'
+                    : 'bg-red-500'
+                  : recordingSeconds > 0
+                  ? 'bg-indigo-400'
+                  : 'bg-emerald-400'
+              }`}
+            />
+          </div>
+
+          {/* Duration Counter Readout */}
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+              {isRecording ? (isPaused ? 'PAUSED' : 'REC') : recordingSeconds > 0 ? 'LENGTH' : 'DURATION'}
+            </span>
+            <span
+              id="canvas-duration-digits"
+              className={`font-mono text-xs sm:text-sm font-bold tracking-widest ${
+                isRecording
+                  ? isPaused
+                    ? 'text-amber-300'
+                    : 'text-white'
+                  : 'text-zinc-200'
+              }`}
+            >
+              {formatDisplayDuration(recordingSeconds)}
+            </span>
+          </div>
+
+          <div className="h-3 w-px bg-zinc-800 hidden sm:block" />
+
+          {/* Quick Details Badges */}
+          <div className="hidden sm:flex items-center gap-1.5 text-[10px] font-mono text-zinc-400">
+            <span className="text-indigo-300 font-semibold">{activeAspectRatio.id}</span>
+            <span className="text-zinc-600">•</span>
+            <span className="text-zinc-300">{exportFramerate}fps</span>
+          </div>
+        </div>
+
         {/* Compositor Canvas Overlay (Cursor Halo, Click Ripples, Softsubs, Timer Overlay) */}
         <canvas
           ref={canvasRef}
-          width={DEFAULT_STUDIO_CONFIG.canvasWidth}
-          height={DEFAULT_STUDIO_CONFIG.canvasHeight}
+          width={activeAspectRatio.width}
+          height={activeAspectRatio.height}
           className="absolute inset-0 w-full h-full pointer-events-none z-20"
+        />
+
+        {/* Real-time Drawing & Screen Highlight Pointer Interaction Overlay */}
+        <div
+          id="drawing-interaction-overlay"
+          aria-label="Screen drawing and highlight canvas overlay"
+          onPointerDown={handleDrawingPointerDown}
+          onPointerMove={handleDrawingPointerMove}
+          onPointerUp={handleDrawingPointerUp}
+          onPointerLeave={handleDrawingPointerUp}
+          className={`absolute inset-0 w-full h-full z-25 touch-none select-none transition-all ${
+            isDrawModeActive
+              ? 'pointer-events-auto cursor-crosshair ring-2 ring-amber-500/40 bg-amber-500/[0.015]'
+              : 'pointer-events-none'
+          }`}
         />
 
         {/* Draggable Circular Camera Bubble (Loom Style) */}
@@ -1378,6 +2701,148 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             </kbd>
           </button>
         )}
+
+        {/* Floating Screen Drawing & Annotation Toolbar */}
+        <div
+          id="drawing-annotation-toolbar"
+          className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-1.5 pointer-events-auto select-none"
+        >
+          {isDrawModeActive ? (
+            <div className="flex flex-col gap-2 p-2.5 rounded-2xl bg-zinc-950/95 backdrop-blur-md border border-amber-500/40 shadow-2xl shadow-amber-500/10 text-xs animate-in fade-in zoom-in-95 duration-150 max-w-[340px] sm:max-w-none">
+              {/* Header Bar */}
+              <div className="flex items-center justify-between gap-3 border-b border-zinc-800 pb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+                  <span className="font-bold text-amber-300 text-xs flex items-center gap-1.5">
+                    <Highlighter className="w-3.5 h-3.5" />
+                    <span>Screen Highlighter</span>
+                  </span>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+                    {strokes.length} on-screen
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleUndoStroke}
+                    disabled={strokes.length === 0}
+                    title="Undo last stroke"
+                    className="p-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 disabled:opacity-30 disabled:hover:bg-zinc-900 text-zinc-300 hover:text-white transition cursor-pointer"
+                  >
+                    <Undo2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearStrokes}
+                    disabled={strokes.length === 0}
+                    title="Clear all screen highlights"
+                    className="p-1 rounded-lg bg-zinc-900 hover:bg-red-950/50 hover:text-red-300 disabled:opacity-30 disabled:hover:bg-zinc-900 text-zinc-400 transition cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsDrawModeActive(false)}
+                    title="Close drawing mode (Hotkey: D)"
+                    className="p-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-400 hover:text-white transition cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Tool Selection Row */}
+              <div className="flex items-center gap-1 bg-zinc-900/80 p-1 rounded-xl border border-zinc-800/80">
+                {[
+                  { id: 'highlighter' as DrawingToolType, label: 'Highlight', icon: Highlighter, hint: 'Translucent glow marker' },
+                  { id: 'pen' as DrawingToolType, label: 'Pen', icon: PenTool, hint: 'Solid freehand line' },
+                  { id: 'rect' as DrawingToolType, label: 'Box', icon: Square, hint: 'Highlight rectangular region' },
+                  { id: 'arrow' as DrawingToolType, label: 'Arrow', icon: ArrowUpRight, hint: 'Directional pointer arrow' },
+                  { id: 'circle' as DrawingToolType, label: 'Spotlight', icon: CircleDot, hint: 'Circle focus spotlight' },
+                ].map((tool) => {
+                  const ToolIcon = tool.icon;
+                  const isSelected = drawingTool === tool.id;
+                  return (
+                    <button
+                      key={tool.id}
+                      type="button"
+                      onClick={() => setDrawingTool(tool.id)}
+                      title={`${tool.label} (${tool.hint})`}
+                      className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-amber-500 text-zinc-950 font-bold shadow-sm'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+                      }`}
+                    >
+                      <ToolIcon className="w-3 h-3" />
+                      <span className="hidden sm:inline">{tool.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Color Swatches & Status */}
+              <div className="flex items-center justify-between gap-2 pt-0.5">
+                <div className="flex items-center gap-1.5">
+                  {DRAWING_COLOR_PRESETS.map((preset) => {
+                    const isSelected = drawingColor === preset.value;
+                    return (
+                      <button
+                        key={preset.value}
+                        type="button"
+                        onClick={() => setDrawingColor(preset.value)}
+                        title={preset.name}
+                        className={`w-5 h-5 rounded-full transition-transform cursor-pointer relative flex items-center justify-center ${
+                          isSelected ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-zinc-950' : 'hover:scale-110 opacity-80 hover:opacity-100'
+                        }`}
+                        style={{ backgroundColor: preset.value }}
+                      >
+                        {isSelected && <span className="w-1.5 h-1.5 rounded-full bg-zinc-950" />}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-1 text-[10px] font-mono text-zinc-400">
+                  <span className="text-zinc-500">Live captured:</span>
+                  <span className="text-emerald-400 font-semibold">{activeAspectRatio.width}×{activeAspectRatio.height}</span>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              {strokes.length > 0 && (
+                <button
+                  type="button"
+                  id="quick-clear-annotations-btn"
+                  onClick={handleClearStrokes}
+                  title="Clear on-screen annotations"
+                  className="px-2.5 py-1.5 rounded-xl bg-zinc-950/85 hover:bg-red-950/40 hover:border-red-800/60 backdrop-blur-md border border-zinc-800 text-zinc-400 hover:text-red-300 text-[11px] font-mono flex items-center gap-1 shadow-xl transition cursor-pointer"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  <span>Clear ({strokes.length})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                id="open-drawing-toolbar-btn"
+                onClick={() => setIsDrawModeActive(true)}
+                title="Open Screen Drawing & Highlighter overlay (Hotkey: D)"
+                className="px-3 py-1.5 rounded-xl bg-zinc-950/85 hover:bg-zinc-900 backdrop-blur-md border border-zinc-800 hover:border-amber-500/50 text-zinc-300 hover:text-amber-300 text-[11px] font-semibold flex items-center gap-1.5 shadow-xl transition cursor-pointer"
+              >
+                <Highlighter className="w-3.5 h-3.5 text-amber-400" />
+                <span>Highlight Screen</span>
+                <kbd className="px-1.5 py-0.2 rounded bg-zinc-900 border border-zinc-700 text-[10px] text-amber-300 font-bold font-mono">
+                  D
+                </kbd>
+                {strokes.length > 0 && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                )}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Visual Annotations Drawer (when "Add Visual Annotations" is enabled) */}

@@ -19,7 +19,11 @@ Inspired by **OBS Studio, Camtasia, ScreenFlow, Scribe, Guidde, and Loom**, this
   - Multi-layer canvas compositor with mouse click ripple animations and cursor highlight halos.
   - Real-time Web Audio API VU meter and Fast Fourier Transform (FFT) waveform.
   - **Real-Time Recording Timer Overlay**: Configurable, toggleable recording clock directly composited onto video frames (`DEFAULT_STUDIO_CONFIG`, `TIMER_OVERLAY_STYLE`).
-  - Client-side production export to **MP4** and **WebM** containers (1080p 60FPS / 720p 30FPS).
+  - **Flexible Multi-Format Export Engine (MP4, WEBM, GIF)**:
+    - **MP4 (H.264 / AAC)**: Universal industry-standard container for YouTube, course portals, Canvas LMS, and cross-platform playback.
+    - **WEBM (VP9 / Opus)**: Lightweight, high-efficiency open web format for HTML5 streaming without re-encoding delay.
+    - **GIF (GIF89a Looping Animation)**: Client-side animated GIF compiler for embedding short clips directly in GitHub READMEs, PR reviews, bug reports, and Discord/Slack chats.
+    - **Post-Recording Export Hub**: Dedicated review deck showing recorded video preview, format comparison cards, single-click downloads, and bundled subtitle (`.vtt` / `.srt`) exports.
 
 - 🎨 **Real-Time Video Filter & Color-Correction LUT Pipeline**:
   - Live hardware-accelerated 2D canvas color grading pipeline (`ctx.filter` & pixel-level algorithmic LUT).

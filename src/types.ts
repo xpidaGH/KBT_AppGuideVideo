@@ -96,8 +96,22 @@ export interface RecordingTelemetryEvent {
   details?: string;
 }
 
+export type ExportFormatId = 'mp4' | 'webm' | 'gif';
+
+export interface ExportFormatPreset {
+  id: ExportFormatId;
+  label: string;
+  name: string;
+  extension: string;
+  mimeType: string;
+  badge: string;
+  description: string;
+  recommendedFor: string;
+  icon: 'mp4' | 'webm' | 'gif';
+}
+
 export interface VideoExportOptions {
-  format: 'webm' | 'mp4';
+  format: ExportFormatId;
   resolution: '1080p' | '720p';
   framerate: 30 | 60;
   includeCaptions: boolean;
@@ -127,3 +141,85 @@ export interface ColorFilterPreset {
   previewGradient: string;
   rgbBalance?: { r: number; g: number; b: number; contrast?: number };
 }
+
+export type AspectRatioId = '16:9' | '9:16' | '1:1' | '4:3';
+
+export interface AspectRatioPreset {
+  id: AspectRatioId;
+  label: string;
+  name: string;
+  platform: string;
+  width: number;
+  height: number;
+  aspectClass: string;
+  description: string;
+}
+
+export interface ProjectRecordingMetadata {
+  projectTitle: string;
+  projectDescription: string;
+  recordedAt: string;
+  durationSeconds: number;
+  formattedDuration: string;
+  language: SupportedLanguageCode;
+  languageName: string;
+  aspectRatio: AspectRatioId;
+  resolution: {
+    width: number;
+    height: number;
+  };
+  exportFormat: ExportFormatId;
+  framerate: number;
+  quality: string;
+  colorFilter: ColorFilterId;
+  interactiveWorkflowStepsCount: number;
+  subtitleCuesCount: number;
+  stepsSummary?: Array<{
+    stepNumber: number;
+    title: string;
+    actionType: string;
+    targetElement: string;
+    timestamp: number;
+  }>;
+  subtitlesSummary?: Array<{
+    id: string;
+    startTime: number;
+    endTime: number;
+    speaker?: string;
+    text: string;
+  }>;
+
+  generator: string;
+  version: string;
+}
+
+export interface SavedProjectSettings {
+  projectTitle: string;
+  projectDescription: string;
+  selectedExportFormat: ExportFormatId;
+  selectedAspectRatio: AspectRatioId;
+  exportQuality: '1080p' | '720p';
+  exportFramerate: 30 | 60;
+  saveMetadataAlongside: boolean;
+  selectedFilter?: ColorFilterId;
+  lastSavedAt?: string;
+}
+
+export type DrawingToolType = 'pen' | 'highlighter' | 'rect' | 'arrow' | 'circle';
+
+export interface DrawingPoint {
+  x: number;
+  y: number;
+}
+
+export interface DrawingStroke {
+  id: string;
+  tool: DrawingToolType;
+  color: string;
+  strokeWidth: number;
+  points: DrawingPoint[];
+  timestamp?: number;
+}
+
+
+
