@@ -83,6 +83,10 @@ export default function App() {
         window.dispatchEvent(
           new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_DRAW' } })
         );
+      } else if (e.key === 'g' || e.key === 'G') {
+        window.dispatchEvent(
+          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_TELEMETRY' } })
+        );
       }
     };
 

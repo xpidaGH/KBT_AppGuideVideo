@@ -153,6 +153,7 @@ export const DEFAULT_STUDIO_CONFIG = {
   defaultQuality: '1080p' as const,
   defaultFramerate: 60 as const,
   defaultShowTimerOverlay: true,
+  defaultAutoExportOnStop: true,
   defaultFilter: 'none' as ColorFilterId,
   defaultCameraWidth: 320,
   defaultCameraHeight: 240,
@@ -213,7 +214,8 @@ export interface KeyboardShortcutDef {
     | 'TOGGLE_MIC'
     | 'PREVIEW_TTS'
     | 'CYCLE_FILTER'
-    | 'TOGGLE_DRAW';
+    | 'TOGGLE_DRAW'
+    | 'TOGGLE_TELEMETRY';
 }
 
 export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
@@ -265,6 +267,13 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
     displayKey: 'P',
     description: 'Preview TTS Voice',
     action: 'PREVIEW_TTS',
+  },
+  {
+    key: 'g',
+    code: 'KeyG',
+    displayKey: 'G',
+    description: 'Toggle GPU/CPU Telemetry',
+    action: 'TOGGLE_TELEMETRY',
   },
 ];
 

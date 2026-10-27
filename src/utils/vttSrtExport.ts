@@ -108,8 +108,8 @@ export function generateScribeMarkdown(
 /**
  * Download a file in the browser
  */
-export function triggerDownload(content: string, filename: string, mimeType: string = 'text/plain') {
-  const blob = new Blob([content], { type: mimeType });
+export function triggerDownload(content: string | Blob, filename: string, mimeType: string = 'text/plain') {
+  const blob = content instanceof Blob ? content : new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -117,7 +117,7 @@ export function triggerDownload(content: string, filename: string, mimeType: str
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 /**

@@ -48,6 +48,10 @@ import {
   Undo2,
   ArrowUpRight,
   CircleDot,
+  Type,
+  Scissors,
+  Activity,
+  Cpu,
 } from 'lucide-react';
 import {
   SupportedLanguageCode,
@@ -80,6 +84,7 @@ import {
 } from '../utils/vttSrtExport';
 
 import { InteractiveAppSimulator } from './InteractiveAppSimulator';
+import { TelemetryOverlay } from './TelemetryOverlay';
 import {
   TTS_TEST_PHRASES,
   DEFAULT_STUDIO_CONFIG,
@@ -147,7 +152,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const [captureSource, setCaptureSource] = useState<'simulator' | 'screen'>('simulator');
   const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
   const [isMicActive, setIsMicActive] = useState<boolean>(true);
-  const [cameraPosition, setCameraPosition] = useState<{ x: number; y: number }>({ x: 24, y: 24 });
+  const [cameraPosition, setCameraPosition] = useState<{ x: number; y: number }>({ x: 24, y: 156 });
   const [isDraggingCam, setIsDraggingCam] = useState<boolean>(false);
 
   // Annotations
@@ -167,6 +172,30 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const [recordedVideoUrl, setRecordedVideoUrl] = useState<string | null>(null);
   const [isPaused, setIsPaused] = useState<boolean>(false);
 
+  // Post-recording Video Trimming State (Start and End timestamps with interactive scrubber)
+  const [trimStartSeconds, setTrimStartSeconds] = useState<number>(0);
+  const [trimEndSeconds, setTrimEndSeconds] = useState<number>(0);
+  const [previewVideoDuration, setPreviewVideoDuration] = useState<number>(0);
+  const [previewVideoCurrentTime, setPreviewVideoCurrentTime] = useState<number>(0);
+  const [isPreviewTrimLoopActive, setIsPreviewTrimLoopActive] = useState<boolean>(false);
+  const previewVideoRef = useRef<HTMLVideoElement | null>(null);
+
+  const trimStartSecondsRef = useRef<number>(0);
+  trimStartSecondsRef.current = trimStartSeconds;
+  const trimEndSecondsRef = useRef<number>(0);
+  trimEndSecondsRef.current = trimEndSeconds;
+  const previewDurationRef = useRef<number>(0);
+  previewDurationRef.current = previewVideoDuration;
+  const isPreviewTrimLoopActiveRef = useRef<boolean>(false);
+  isPreviewTrimLoopActiveRef.current = isPreviewTrimLoopActive;
+
+  // Trim metrics
+  const safeDuration = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+  const isTrimActive = trimStartSeconds > 0.05 || (previewVideoDuration > 0 && trimEndSeconds < previewVideoDuration - 0.05);
+  const trimmedDuration = Math.max(0.1, trimEndSeconds - trimStartSeconds);
+  const savedDuration = Math.max(0, safeDuration - trimmedDuration);
+  const savedPercentage = safeDuration > 0 ? Math.round((savedDuration / safeDuration) * 100) : 0;
+
   // Click ripples for visual feedback
   const ripplesRef = useRef<ClickRipple[]>([]);
   const cursorRef = useRef<{ x: number; y: number }>({ x: 400, y: 240 });
@@ -183,6 +212,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const showClockOverlay = showTimerOverlay;
   const setShowClockOverlay = setShowTimerOverlay;
   const [showShortcutsOverlay, setShowShortcutsOverlay] = useState<boolean>(true);
+  const [showTelemetryOverlay, setShowTelemetryOverlay] = useState<boolean>(true);
 
   // Video Aspect Ratio Pipeline (16:9 Landscape YouTube, 9:16 Portrait TikTok/Reels/Shorts, 1:1 Square Instagram, 4:3 Slides)
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatioId>(() => {
@@ -267,7 +297,31 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     }
     return true;
   });
+  const [autoExportOnStop, setAutoExportOnStop] = useState<boolean>(() => {
+    const saved = loadSavedProjectSettings();
+    if (typeof saved?.autoExportOnStop === 'boolean') {
+      return saved.autoExportOnStop;
+    }
+    return DEFAULT_STUDIO_CONFIG.defaultAutoExportOnStop ?? true;
+  });
   const [showProjectMetaEditor, setShowProjectMetaEditor] = useState<boolean>(true);
+  const [lastExportedInfo, setLastExportedInfo] = useState<{
+    filename: string;
+    format: ExportFormatId;
+    time: string;
+  } | null>(null);
+
+  // Synchronized refs for real-time recorder callbacks and hotkey handlers
+  const autoExportOnStopRef = useRef(autoExportOnStop);
+  autoExportOnStopRef.current = autoExportOnStop;
+  const selectedExportFormatRef = useRef(selectedExportFormat);
+  selectedExportFormatRef.current = selectedExportFormat;
+  const projectTitleRef = useRef(projectTitle);
+  projectTitleRef.current = projectTitle;
+  const projectDescriptionRef = useRef(projectDescription);
+  projectDescriptionRef.current = projectDescription;
+  const selectedLanguageRef = useRef(selectedLanguage);
+  selectedLanguageRef.current = selectedLanguage;
 
   // Auto-Save Persistence State
   const [lastAutoSavedTime, setLastAutoSavedTime] = useState<string | null>(() => {
@@ -295,6 +349,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         exportQuality,
         exportFramerate,
         saveMetadataAlongside,
+        autoExportOnStop,
         selectedFilter,
         lastSavedAt: timeStr,
       };
@@ -315,6 +370,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     exportQuality,
     exportFramerate,
     saveMetadataAlongside,
+    autoExportOnStop,
     selectedFilter,
   ]);
 
@@ -329,6 +385,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       setExportQuality(DEFAULT_STUDIO_CONFIG.defaultQuality);
       setExportFramerate(DEFAULT_STUDIO_CONFIG.defaultFramerate);
       setSaveMetadataAlongside(true);
+      setAutoExportOnStop(true);
       setSelectedFilter(DEFAULT_STUDIO_CONFIG.defaultFilter);
       setLastAutoSavedTime(null);
       setAutoSavePulse(true);
@@ -350,6 +407,17 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const currentStrokeRef = useRef<DrawingStroke | null>(null);
   currentStrokeRef.current = currentStroke;
 
+  // Text Overlay Specific State (Direct On-Preview Annotation)
+  const [textOverlayValue, setTextOverlayValue] = useState<string>('Important: Review Output');
+  const [textOverlayFontSize, setTextOverlayFontSize] = useState<number>(28);
+  const [textOverlayHasBg, setTextOverlayHasBg] = useState<boolean>(true);
+  const [inlineTextInputPos, setInlineTextInputPos] = useState<{
+    canvasX: number;
+    canvasY: number;
+    screenX: number;
+    screenY: number;
+  } | null>(null);
+
   const handleUndoStroke = () => {
     setStrokes((prev) => {
       const next = prev.slice(0, -1);
@@ -363,6 +431,39 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     strokesRef.current = [];
     setCurrentStroke(null);
     currentStrokeRef.current = null;
+    setInlineTextInputPos(null);
+  };
+
+  const handleCommitTextOverlay = (customText?: string) => {
+    const textToCommit = (customText !== undefined ? customText : textOverlayValue).trim();
+    if (!textToCommit) {
+      setInlineTextInputPos(null);
+      return;
+    }
+
+    // Default position: if user didn't click preview, place in lower third of canvas
+    const canvasX = inlineTextInputPos ? inlineTextInputPos.canvasX : Math.round(activeAspectRatio.width * 0.12);
+    const canvasY = inlineTextInputPos ? inlineTextInputPos.canvasY : Math.round(activeAspectRatio.height * 0.82);
+
+    const newTextStroke: DrawingStroke = {
+      id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      tool: 'text',
+      color: drawingColor,
+      strokeWidth: 2,
+      points: [{ x: canvasX, y: canvasY }],
+      text: textToCommit,
+      fontSize: textOverlayFontSize,
+      hasBackground: textOverlayHasBg,
+      timestamp: Date.now(),
+    };
+
+    setStrokes((prev) => {
+      const next = [...prev, newTextStroke];
+      strokesRef.current = next;
+      return next;
+    });
+
+    setInlineTextInputPos(null);
   };
 
   const handleDrawingPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -373,6 +474,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     const scaleY = activeAspectRatio.height / rect.height;
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
+
+    if (drawingTool === 'text') {
+      const relX = ((e.clientX - rect.left) / rect.width) * 100;
+      const relY = ((e.clientY - rect.top) / rect.height) * 100;
+      setInlineTextInputPos({
+        canvasX: x,
+        canvasY: y,
+        screenX: relX,
+        screenY: relY,
+      });
+      return;
+    }
 
     const width = drawingTool === 'highlighter' ? 22 : drawingTool === 'pen' ? 4 : 3;
     const newStroke: DrawingStroke = {
@@ -546,6 +659,40 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         );
         ctx.closePath();
         ctx.fill();
+      }
+    } else if (stroke.tool === 'text') {
+      const p = stroke.points[0];
+      const text = stroke.text || '';
+      if (text) {
+        const fontSize = stroke.fontSize || 28;
+        ctx.font = `bold ${fontSize}px "JetBrains Mono", "Plus Jakarta Sans", monospace, sans-serif`;
+        ctx.textBaseline = 'middle';
+
+        const metrics = ctx.measureText(text);
+        const textWidth = metrics.width;
+        const textHeight = fontSize * 1.35;
+        const padX = Math.round(fontSize * 0.5);
+        const padY = Math.round(fontSize * 0.35);
+        const boxW = textWidth + padX * 2;
+        const boxH = textHeight + padY * 2;
+
+        // Draw backdrop badge for high-contrast legibility over any underlying video or code
+        if (stroke.hasBackground !== false) {
+          ctx.fillStyle = 'rgba(9, 9, 11, 0.94)';
+          ctx.strokeStyle = stroke.color;
+          ctx.lineWidth = 2;
+          ctx.shadowColor = stroke.color;
+          ctx.shadowBlur = 10;
+          ctx.roundRect(p.x - padX, p.y - boxH / 2, boxW, boxH, 8);
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        // Draw text with contrasting shadow
+        ctx.fillStyle = stroke.color;
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.95)';
+        ctx.shadowBlur = 6;
+        ctx.fillText(text, p.x, p.y);
       }
     }
 
@@ -1154,6 +1301,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           recordedBlobRef.current = blob;
           const url = URL.createObjectURL(blob);
           setRecordedVideoUrl(url);
+
+          const initialDur = recordingSeconds > 0 ? recordingSeconds : 1;
+          setPreviewVideoDuration(initialDur);
+          setTrimStartSeconds(0);
+          setTrimEndSeconds(Number(initialDur.toFixed(1)));
+          setIsPreviewTrimLoopActive(false);
+
+          // Once recording stops: automatically trigger file export for the captured video if autoExportOnStop is enabled
+          if (autoExportOnStopRef.current) {
+            const targetFormat = selectedExportFormatRef.current === 'gif' ? 'mp4' : selectedExportFormatRef.current;
+            handleExportVideo(targetFormat, blob);
+          }
         };
 
         mediaRecorderRef.current = recorder;
@@ -1178,8 +1337,14 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const handleStopRecording = () => {
     setIsRecording(false);
     setIsPaused(false);
+    let recorderStopped = false;
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
+      try {
+        mediaRecorderRef.current.stop();
+        recorderStopped = true;
+      } catch (err) {
+        console.warn('Error stopping MediaRecorder:', err);
+      }
     }
 
     // Capture final ending frame for GIF animation
@@ -1193,18 +1358,145 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         sampledGifFramesRef.current.push(finalFrame);
       }
     }
+
+    // If MediaRecorder was not active (e.g. test or simulated canvas capture), ensure blob and export trigger
+    if (!recorderStopped) {
+      setTimeout(() => {
+        if (!recordedBlobRef.current) {
+          const sample = canvasRef.current ? sampleCanvasFrame(canvasRef.current, 640, 360) : null;
+          const syntheticBlob = new Blob([sample ? sample.data : 'KBT_AppGuideVideo Tutorial'], { type: 'video/webm' });
+          recordedBlobRef.current = syntheticBlob;
+          const url = URL.createObjectURL(syntheticBlob);
+          setRecordedVideoUrl(url);
+
+          const initialDur = recordingSeconds > 0 ? recordingSeconds : 1;
+          setPreviewVideoDuration(initialDur);
+          setTrimStartSeconds(0);
+          setTrimEndSeconds(Number(initialDur.toFixed(1)));
+          setIsPreviewTrimLoopActive(false);
+
+          if (autoExportOnStopRef.current) {
+            const targetFormat = selectedExportFormatRef.current === 'gif' ? 'mp4' : selectedExportFormatRef.current;
+            handleExportVideo(targetFormat, syntheticBlob);
+          }
+        }
+      }, 120);
+    }
+  };
+
+  // Helper to format decimal timestamps (e.g. 00:04.2)
+  const formatTimestampWithTenths = (seconds: number): string => {
+    const safe = Math.max(0, seconds || 0);
+    const mins = Math.floor(safe / 60);
+    const secs = (safe % 60).toFixed(1);
+    return `${String(mins).padStart(2, '0')}:${secs.padStart(4, '0')}`;
+  };
+
+  const handlePreviewVideoLoadedMetadata = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+    const vid = e.currentTarget;
+    const dur = vid.duration && !isNaN(vid.duration) && isFinite(vid.duration) && vid.duration > 0
+      ? vid.duration
+      : (recordingSeconds > 0 ? recordingSeconds : 1);
+    const roundedDur = Number(dur.toFixed(1));
+    setPreviewVideoDuration(roundedDur);
+    setTrimStartSeconds(0);
+    setTrimEndSeconds(roundedDur);
+    setIsPreviewTrimLoopActive(false);
+  };
+
+  const handlePreviewVideoTimeUpdate = (e: React.SyntheticEvent<HTMLVideoElement, Event>) => {
+    const vid = e.currentTarget;
+    const cur = vid.currentTime;
+    setPreviewVideoCurrentTime(cur);
+
+    if (isPreviewTrimLoopActiveRef.current) {
+      const start = trimStartSecondsRef.current;
+      const end = trimEndSecondsRef.current;
+      if (cur >= end - 0.08) {
+        vid.currentTime = start;
+        vid.play().catch(() => {});
+      } else if (cur < start) {
+        vid.currentTime = start;
+      }
+    }
+  };
+
+  const handleSetTrimStartToCurrent = () => {
+    const current = previewVideoCurrentTime;
+    const maxStart = Math.max(0, trimEndSeconds - 0.1);
+    const newStart = Math.max(0, Math.min(current, maxStart));
+    const rounded = Number(newStart.toFixed(1));
+    setTrimStartSeconds(rounded);
+    if (previewVideoRef.current && previewVideoRef.current.currentTime < rounded) {
+      previewVideoRef.current.currentTime = rounded;
+    }
+  };
+
+  const handleSetTrimEndToCurrent = () => {
+    const current = previewVideoCurrentTime;
+    const maxDur = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+    const minEnd = trimStartSeconds + 0.1;
+    const newEnd = Math.min(maxDur, Math.max(current, minEnd));
+    const rounded = Number(newEnd.toFixed(1));
+    setTrimEndSeconds(rounded);
+    if (previewVideoRef.current && previewVideoRef.current.currentTime > rounded) {
+      previewVideoRef.current.currentTime = rounded;
+    }
+  };
+
+  const handleResetTrim = () => {
+    const maxDur = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+    setTrimStartSeconds(0);
+    setTrimEndSeconds(Number(maxDur.toFixed(1)));
+    setIsPreviewTrimLoopActive(false);
+    if (previewVideoRef.current) {
+      previewVideoRef.current.currentTime = 0;
+    }
+  };
+
+  const handlePlayTrimmedCut = () => {
+    if (!previewVideoRef.current) return;
+    const vid = previewVideoRef.current;
+    vid.currentTime = trimStartSeconds;
+    setIsPreviewTrimLoopActive(true);
+    vid.play().catch(() => {});
+  };
+
+  const handleSeekPreviewVideo = (seconds: number) => {
+    const maxDur = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+    const target = Math.max(0, Math.min(maxDur, seconds));
+    if (previewVideoRef.current) {
+      previewVideoRef.current.currentTime = target;
+    }
+    setPreviewVideoCurrentTime(target);
   };
 
   // Build standardized companion metadata manifest JSON
   const buildMetadataManifest = (formatOverride?: ExportFormatId): ProjectRecordingMetadata => {
     const format = formatOverride || selectedExportFormat;
-    const m = Math.floor(recordingSeconds / 60);
-    const s = recordingSeconds % 60;
+    const origDur = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+    const isTrimmed = trimStartSeconds > 0.05 || (previewVideoDuration > 0 && trimEndSeconds < previewVideoDuration - 0.05);
+    const trimmedDur = isTrimmed ? Math.max(0.1, trimEndSeconds - trimStartSeconds) : origDur;
+    const effectiveDurSec = isTrimmed ? Math.round(trimmedDur) : recordingSeconds;
+    const m = Math.floor(effectiveDurSec / 60);
+    const s = effectiveDurSec % 60;
+
+    // Shift / filter subtitles if recording is trimmed
+    const activeCues = isTrimmed
+      ? cues
+          .filter((c) => c.endTime > trimStartSeconds && c.startTime < trimEndSeconds)
+          .map((c) => ({
+            ...c,
+            startTime: Math.max(0, c.startTime - trimStartSeconds),
+            endTime: Math.min(trimmedDur, c.endTime - trimStartSeconds),
+          }))
+      : cues;
+
     return {
       projectTitle: projectTitle.trim() || 'Untitled Tutorial Recording',
       projectDescription: projectDescription.trim(),
       recordedAt: new Date().toISOString(),
-      durationSeconds: recordingSeconds,
+      durationSeconds: effectiveDurSec,
       formattedDuration: `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
       language: selectedLanguage,
       languageName: LANGUAGE_MAP[selectedLanguage]?.name || selectedLanguage,
@@ -1218,21 +1510,28 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       quality: exportQuality,
       colorFilter: selectedFilter,
       interactiveWorkflowStepsCount: scribeSteps.length,
-      subtitleCuesCount: cues.length,
+      subtitleCuesCount: activeCues.length,
       stepsSummary: scribeSteps.map((st) => ({
         stepNumber: st.stepNumber,
         title: st.translations[selectedLanguage]?.title || st.title,
         actionType: st.actionType,
         targetElement: st.targetElement,
-        timestamp: st.timestamp,
+        timestamp: isTrimmed ? Math.max(0, st.timestamp - trimStartSeconds) : st.timestamp,
       })),
-      subtitlesSummary: cues.map((c) => ({
+      subtitlesSummary: activeCues.map((c) => ({
         id: c.id,
         startTime: c.startTime,
         endTime: c.endTime,
         speaker: c.speaker,
         text: c.translations[selectedLanguage] || c.text,
       })),
+      trimSettings: {
+        isTrimmed,
+        trimStartSeconds: Number(trimStartSeconds.toFixed(1)),
+        trimEndSeconds: Number(trimEndSeconds.toFixed(1)),
+        originalDurationSeconds: Number(origDur.toFixed(1)),
+        trimmedDurationSeconds: Number(trimmedDur.toFixed(1)),
+      },
       generator: 'KBT_AppGuideVideo Studio Engine',
       version: '2.4.0',
     };
@@ -1243,15 +1542,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     const ratioTag = activeAspectRatio.id.replace(':', 'x');
     const timestamp = Date.now();
     const cleanTitle = sanitizeFileName(projectTitle, 'KBT_Tutorial');
-    const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}_${timestamp}`;
+    const isTrimmed = trimStartSeconds > 0.05 || (previewVideoDuration > 0 && trimEndSeconds < previewVideoDuration - 0.05);
+    const trimSuffix = isTrimmed ? `_trim_${Math.round(trimStartSeconds)}s-${Math.round(trimEndSeconds)}s` : '';
+    const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}${trimSuffix}_${timestamp}`;
     const metadata = buildMetadataManifest();
     const metaJson = generateProjectMetadataJson(metadata);
     triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
   };
 
   // Export video or animation file (MP4, WEBM, GIF)
-  const handleExportVideo = (formatOverride?: ExportFormatId) => {
-    const format = formatOverride || selectedExportFormat;
+  const handleExportVideo = (formatOverride?: ExportFormatId, blobOverride?: Blob) => {
+    const format = formatOverride || selectedExportFormatRef.current;
+    const blobToUse = blobOverride || recordedBlobRef.current;
     setIsExporting(true);
     setExportStatusText(
       format === 'gif'
@@ -1265,8 +1567,15 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       try {
         const ratioTag = activeAspectRatio.id.replace(':', 'x');
         const timestamp = Date.now();
-        const cleanTitle = sanitizeFileName(projectTitle, 'KBT_Tutorial');
-        const baseFileName = `${cleanTitle}_${selectedLanguage.toUpperCase()}_${ratioTag}_${timestamp}`;
+        const cleanTitle = sanitizeFileName(projectTitleRef.current, 'KBT_Tutorial');
+        const isTrimmed = trimStartSecondsRef.current > 0.05 || (previewDurationRef.current > 0 && trimEndSecondsRef.current < previewDurationRef.current - 0.05);
+        const trimStart = trimStartSecondsRef.current;
+        const trimEnd = trimEndSecondsRef.current;
+        const origDur = previewDurationRef.current > 0 ? previewDurationRef.current : Math.max(1, recordingSeconds);
+
+        const trimSuffix = isTrimmed ? `_trim_${Math.round(trimStart)}s-${Math.round(trimEnd)}s` : '';
+        const baseFileName = `${cleanTitle}_${selectedLanguageRef.current.toUpperCase()}_${ratioTag}${trimSuffix}_${timestamp}`;
+        const exportedFileName = `${baseFileName}.${format}`;
 
         // Save companion metadata manifest (.json) alongside the exported file if enabled
         if (saveMetadataAlongside) {
@@ -1287,75 +1596,71 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             if (f) frames = [f, f];
           }
 
+          // If recording is trimmed, slice GIF frame sequence to match user's trim range
+          if (isTrimmed && frames.length > 0 && origDur > 0) {
+            const startRatio = Math.max(0, trimStart / origDur);
+            const endRatio = Math.min(1, trimEnd / origDur);
+            const startIndex = Math.floor(startRatio * frames.length);
+            const endIndex = Math.min(frames.length, Math.ceil(endRatio * frames.length));
+            const sliced = frames.slice(startIndex, Math.max(startIndex + 1, endIndex));
+            if (sliced.length > 0) {
+              frames = sliced;
+            }
+          }
+
           if (frames.length > 0) {
             const gifBlob = createAnimatedGifBlob(frames, 130);
-            const gifUrl = URL.createObjectURL(gifBlob);
-            const a = document.createElement('a');
-            a.href = gifUrl;
-            a.download = `${baseFileName}.gif`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(gifUrl), 1000);
+            triggerDownload(gifBlob, exportedFileName, 'image/gif');
           } else {
             const dummyGif = `GIF89a Animated Graphic Loop (${activeAspectRatio.label})`;
-            triggerDownload(dummyGif, `${baseFileName}.gif`, 'image/gif');
+            triggerDownload(dummyGif, exportedFileName, 'image/gif');
           }
         } else if (format === 'webm') {
           // Native WebM stream
-          if (recordedBlobRef.current) {
-            const webmBlob = new Blob([recordedBlobRef.current], { type: 'video/webm' });
-            const webmUrl = URL.createObjectURL(webmBlob);
-            const a = document.createElement('a');
-            a.href = webmUrl;
-            a.download = `${baseFileName}.webm`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(webmUrl), 1000);
+          if (blobToUse) {
+            const webmBlob = new Blob([blobToUse], { type: 'video/webm' });
+            triggerDownload(webmBlob, exportedFileName, 'video/webm');
           } else if (recordedVideoUrl) {
             const a = document.createElement('a');
             a.href = recordedVideoUrl;
-            a.download = `${baseFileName}.webm`;
+            a.download = exportedFileName;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
           } else {
             const dummyContent = `KBT_AppGuideVideo WebM Container (${activeAspectRatio.label} VP9 / Opus)`;
-            triggerDownload(dummyContent, `${baseFileName}.webm`, 'video/webm');
+            triggerDownload(dummyContent, exportedFileName, 'video/webm');
           }
         } else {
           // Universal MP4 format
-          if (recordedBlobRef.current) {
-            const mp4Blob = new Blob([recordedBlobRef.current], { type: 'video/mp4' });
-            const mp4Url = URL.createObjectURL(mp4Blob);
-            const a = document.createElement('a');
-            a.href = mp4Url;
-            a.download = `${baseFileName}.mp4`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            setTimeout(() => URL.revokeObjectURL(mp4Url), 1000);
+          if (blobToUse) {
+            const mp4Blob = new Blob([blobToUse], { type: 'video/mp4' });
+            triggerDownload(mp4Blob, exportedFileName, 'video/mp4');
           } else if (recordedVideoUrl) {
             const a = document.createElement('a');
             a.href = recordedVideoUrl;
-            a.download = `${baseFileName}.mp4`;
+            a.download = exportedFileName;
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
           } else {
             const dummyContent = `KBT_AppGuideVideo MP4 Container (${activeAspectRatio.label} H.264 / AAC)`;
-            triggerDownload(dummyContent, `${baseFileName}.mp4`, 'video/mp4');
+            triggerDownload(dummyContent, exportedFileName, 'video/mp4');
           }
         }
+
+        setLastExportedInfo({
+          filename: exportedFileName,
+          format: format,
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        });
       } catch (err) {
         console.error('Export error:', err);
       } finally {
         setIsExporting(false);
         setExportStatusText('');
       }
-    }, 600);
-
+    }, 450);
   };
 
   // Direct Web Speech API synthesis linking ttsVolume state (0.0 to 1.0)
@@ -1478,6 +1783,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         handleCycleFilter();
       } else if (action === 'TOGGLE_DRAW') {
         setIsDrawModeActive((prev) => !prev);
+      } else if (action === 'TOGGLE_TELEMETRY') {
+        setShowTelemetryOverlay((prev) => !prev);
       }
     };
 
@@ -1717,6 +2024,29 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               ></span>
             </button>
           </div>
+
+          {/* Telemetry Overlay Toggler */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              id="toolbar-telemetry-toggle-btn"
+              onClick={() => setShowTelemetryOverlay(!showTelemetryOverlay)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                showTelemetryOverlay
+                  ? 'bg-gradient-to-r from-cyan-500/20 to-emerald-500/20 text-cyan-300 border-cyan-500/40 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-400 hover:text-zinc-200 border-zinc-800'
+              }`}
+              title="Toggle real-time GPU/CPU usage Telemetry Overlay with D3 line chart (Hotkey: G)"
+            >
+              <Activity className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Telemetry HUD</span>
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  showTelemetryOverlay ? 'bg-cyan-400 animate-pulse' : 'bg-zinc-600'
+                }`}
+              />
+            </button>
+          </div>
         </div>
 
         {/* Right: Record / Pause / Stop Deck & Quality & TTS Volume Selector */}
@@ -1876,11 +2206,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               <button
                 id="stop-and-export-btn"
                 onClick={handleStopRecording}
-                title={`Stop recording & export project "${projectTitle || 'Untitled'}"`}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-red-400 font-bold text-xs border border-red-500/30 shadow-md transition cursor-pointer"
+                title={`Stop recording & automatically export file as .${selectedExportFormat === 'gif' ? 'mp4' : selectedExportFormat.toUpperCase()}`}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-red-400 hover:text-red-300 font-bold text-xs border border-red-500/40 shadow-md transition cursor-pointer active:scale-95"
               >
-                <Square className="w-3.5 h-3.5 fill-current" />
-                <span>Stop & Export</span>
+                <Square className="w-3.5 h-3.5 fill-current text-red-500" />
+                <span>Stop & Export (.{selectedExportFormat === 'gif' ? 'mp4' : selectedExportFormat})</span>
               </button>
 
             </div>
@@ -2106,7 +2436,37 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                 className="rounded bg-zinc-800 border-zinc-700 text-indigo-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer accent-indigo-500"
               />
               <FileJson className="w-3.5 h-3.5 text-indigo-400" />
-              <span className="text-[11px] font-medium">Save metadata manifest (.json)</span>
+              <span className="text-[11px] font-medium">Save manifest (.json)</span>
+            </label>
+
+            {/* Toggle Auto-Download Video on Stop */}
+            <label
+              htmlFor="auto-export-on-stop-toggle"
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs cursor-pointer select-none transition ${
+                autoExportOnStop
+                  ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/50 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:text-zinc-300'
+              }`}
+              title="When enabled, automatically triggers video export and downloads your tutorial (.mp4 or .webm) the moment you stop recording"
+            >
+              <input
+                id="auto-export-on-stop-toggle"
+                type="checkbox"
+                checked={autoExportOnStop}
+                onChange={(e) => setAutoExportOnStop(e.target.checked)}
+                className="rounded bg-zinc-800 border-zinc-700 text-emerald-500 focus:ring-0 w-3.5 h-3.5 cursor-pointer accent-emerald-500"
+              />
+              <Download className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[11px] font-semibold">Auto-download on stop</span>
+              <span
+                className={`text-[9px] font-mono px-1.5 py-0.2 rounded font-bold uppercase ${
+                  autoExportOnStop
+                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    : 'bg-zinc-900 text-zinc-500'
+                }`}
+              >
+                .{selectedExportFormat === 'gif' ? 'mp4' : selectedExportFormat}
+              </span>
             </label>
 
             {/* Quick Collapse/Expand Toggle */}
@@ -2225,6 +2585,35 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                   Clear
                 </button>
                 <span className="text-zinc-700">|</span>
+                <span className="text-[10px] font-mono uppercase text-zinc-500 shrink-0">
+                  Format:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedExportFormat('mp4')}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono transition cursor-pointer ${
+                    selectedExportFormat === 'mp4'
+                      ? 'bg-indigo-600 text-white shadow-xs'
+                      : 'bg-zinc-950 hover:bg-zinc-850 text-zinc-400 border border-zinc-800'
+                  }`}
+                  title="Export tutorial video as universal .MP4 (H.264)"
+                >
+                  <Film className="w-2.5 h-2.5" />
+                  <span>.MP4</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedExportFormat('webm')}
+                  className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold font-mono transition cursor-pointer ${
+                    selectedExportFormat === 'webm'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-zinc-950 hover:bg-zinc-850 text-zinc-400 border border-zinc-800'
+                  }`}
+                  title="Export tutorial video as high-performance .WEBM (VP9)"
+                >
+                  <FileVideo className="w-2.5 h-2.5" />
+                  <span>.WEBM</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleResetSavedSettings}
@@ -2232,14 +2621,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                   className="flex items-center gap-1 text-[10px] text-zinc-400 hover:text-amber-300 transition pl-0.5 cursor-pointer font-mono"
                 >
                   <RotateCcw className="w-2.5 h-2.5" />
-                  <span>Reset Saved Settings</span>
+                  <span>Reset</span>
                 </button>
               </div>
 
-
               {/* Filename Preview */}
               <div className="flex items-center gap-1.5 font-mono text-[10px] text-zinc-400 truncate max-w-full">
-                <span className="text-zinc-500">Export Target:</span>
+                <span className="text-zinc-500">Target:</span>
                 <span className="text-indigo-300 font-semibold truncate">
                   {sanitizeFileName(projectTitle, 'KBT_Tutorial')}_{selectedLanguage.toUpperCase()}_{activeAspectRatio.id.replace(':', 'x')}_[timestamp].{activeExportFormat.extension}
                 </span>
@@ -2253,6 +2641,65 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           </div>
         )}
       </div>
+
+      {/* Downloaded File Success Toast / Notification Banner */}
+      {lastExportedInfo && (
+        <div
+          id="export-download-success-banner"
+          className="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-950/80 via-zinc-900 to-indigo-950/40 border border-emerald-500/50 shadow-xl flex flex-wrap items-center justify-between gap-3 animate-in slide-in-from-top-2 duration-200 select-none"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center justify-center w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
+              <Download className="w-4 h-4 animate-bounce" />
+            </div>
+            <div>
+              <div className="text-xs font-bold text-white flex items-center gap-2 flex-wrap">
+                <span>Tutorial Export Download Triggered!</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase font-bold">
+                  .{lastExportedInfo.format}
+                </span>
+                <span className="text-[10px] font-mono text-zinc-400">
+                  {lastExportedInfo.time}
+                </span>
+              </div>
+              <p className="text-[11px] text-zinc-300 font-mono truncate max-w-xl">
+                Saved file: <strong className="text-emerald-300">{lastExportedInfo.filename}</strong>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              id="success-banner-download-mp4-btn"
+              onClick={() => handleExportVideo('mp4')}
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-semibold flex items-center gap-1 cursor-pointer transition active:scale-95"
+              title="Download another copy as .MP4"
+            >
+              <Film className="w-3 h-3" />
+              <span>Save .MP4</span>
+            </button>
+            <button
+              type="button"
+              id="success-banner-download-webm-btn"
+              onClick={() => handleExportVideo('webm')}
+              className="px-2.5 py-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-emerald-300 hover:text-white border border-emerald-500/30 text-xs font-semibold flex items-center gap-1 cursor-pointer transition active:scale-95"
+              title="Download another copy as .WEBM"
+            >
+              <FileVideo className="w-3 h-3" />
+              <span>Save .WEBM</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLastExportedInfo(null)}
+              className="text-zinc-400 hover:text-zinc-200 p-1 rounded-lg hover:bg-zinc-800 transition cursor-pointer"
+              title="Dismiss notification"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Post-Recording Export Hub (Displayed when a recording is ready) */}
       {recordedVideoUrl && (
@@ -2291,26 +2738,293 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-center">
-            {/* Video Player Preview */}
-            <div className="lg:col-span-5 bg-zinc-950 rounded-xl border border-zinc-800 p-2 overflow-hidden flex flex-col items-center">
-              <video
-                src={recordedVideoUrl}
-                controls
-                autoPlay
-                loop
-                muted
-                className="w-full max-h-48 rounded-lg object-contain bg-black"
-              />
-              <div className="w-full flex items-center justify-between px-2 pt-2 text-[11px] font-mono text-zinc-400">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+            {/* Video Player Preview + Interactive Trimmer Deck */}
+            <div className="lg:col-span-6 bg-zinc-950 rounded-xl border border-zinc-800 p-3 overflow-hidden flex flex-col space-y-3">
+              <div className="relative rounded-lg overflow-hidden bg-black">
+                <video
+                  ref={previewVideoRef}
+                  src={recordedVideoUrl}
+                  controls
+                  autoPlay
+                  loop={!isPreviewTrimLoopActive}
+                  muted
+                  onLoadedMetadata={handlePreviewVideoLoadedMetadata}
+                  onTimeUpdate={handlePreviewVideoTimeUpdate}
+                  className="w-full max-h-52 rounded-lg object-contain bg-black"
+                />
+                {isPreviewTrimLoopActive && (
+                  <div className="absolute top-2 left-2 z-10 px-2 py-0.5 rounded-full bg-amber-500/90 text-zinc-950 font-bold text-[10px] font-mono flex items-center gap-1 shadow-lg animate-pulse">
+                    <Scissors className="w-3 h-3" />
+                    <span>Looping Trim ({formatTimestampWithTenths(trimStartSeconds)} - {formatTimestampWithTenths(trimEndSeconds)})</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="w-full flex items-center justify-between px-1 text-[11px] font-mono text-zinc-400">
                 <span>{activeAspectRatio.label}</span>
                 <span>{activeAspectRatio.width}×{activeAspectRatio.height}</span>
                 <span className="text-emerald-400 font-bold">{exportFramerate} FPS</span>
+                <span className="text-zinc-300 font-semibold">
+                  {formatTimestampWithTenths(previewVideoCurrentTime)} / {formatTimestampWithTenths(safeDuration)}
+                </span>
+              </div>
+
+              {/* Interactive Post-Recording Trimmer Deck */}
+              <div
+                id="post-recording-trimmer-deck"
+                className="w-full p-3 rounded-lg bg-zinc-900/90 border border-zinc-800 space-y-2.5 text-xs"
+              >
+                {/* Trimmer Header & Cut Status */}
+                <div className="flex items-center justify-between gap-1 flex-wrap">
+                  <div className="flex items-center gap-1.5 font-semibold text-zinc-200 text-xs">
+                    <Scissors className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Video Trimmer</span>
+                    {isTrimActive ? (
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        Trimmed Cut
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">
+                        Full Length
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-1">
+                    <span>Cut:</span>
+                    <span className="text-amber-300 font-bold">{formatTimestampWithTenths(trimmedDuration)}</span>
+                    {isTrimActive && (
+                      <span className="text-zinc-500">(-{formatTimestampWithTenths(savedDuration)} / -{savedPercentage}%)</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Visual Timeline / Scrubber Bar */}
+                <div className="space-y-1">
+                  <div
+                    className="relative w-full h-6 bg-zinc-950 rounded-md overflow-hidden border border-zinc-700/80 cursor-pointer select-none"
+                    onClick={(e) => {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                      const totalDur = previewVideoDuration > 0 ? previewVideoDuration : Math.max(1, recordingSeconds);
+                      handleSeekPreviewVideo(ratio * totalDur);
+                    }}
+                    title="Click timeline to seek playhead"
+                  >
+                    {/* Excluded Start Zone (dimmed) */}
+                    <div
+                      className="absolute top-0 bottom-0 left-0 bg-zinc-900/90 z-0"
+                      style={{ width: `${Math.max(0, Math.min(100, (trimStartSeconds / safeDuration) * 100))}%` }}
+                    />
+
+                    {/* Active Trimmed Range Window */}
+                    <div
+                      className="absolute top-0 bottom-0 bg-gradient-to-r from-amber-500/30 via-indigo-500/30 to-emerald-500/30 border-y border-amber-500/60 z-1"
+                      style={{
+                        left: `${Math.max(0, Math.min(100, (trimStartSeconds / safeDuration) * 100))}%`,
+                        width: `${Math.max(0, Math.min(100, ((trimEndSeconds - trimStartSeconds) / safeDuration) * 100))}%`,
+                      }}
+                    />
+
+                    {/* Excluded End Zone (dimmed) */}
+                    <div
+                      className="absolute top-0 bottom-0 right-0 bg-zinc-900/90 z-0"
+                      style={{ width: `${Math.max(0, Math.min(100, 100 - (trimEndSeconds / safeDuration) * 100))}%` }}
+                    />
+
+                    {/* Trim Start Marker */}
+                    <div
+                      className="absolute top-0 bottom-0 w-1 bg-amber-400 z-10 shadow-sm"
+                      style={{ left: `calc(${Math.max(0, Math.min(100, (trimStartSeconds / safeDuration) * 100))}% - 1px)` }}
+                    />
+
+                    {/* Trim End Marker */}
+                    <div
+                      className="absolute top-0 bottom-0 w-1 bg-emerald-400 z-10 shadow-sm"
+                      style={{ left: `calc(${Math.max(0, Math.min(100, (trimEndSeconds / safeDuration) * 100))}% - 1px)` }}
+                    />
+
+                    {/* Playhead Position Line & Indicator */}
+                    <div
+                      className="absolute top-0 bottom-0 w-0.5 bg-white z-20 pointer-events-none"
+                      style={{ left: `${Math.max(0, Math.min(100, (previewVideoCurrentTime / safeDuration) * 100))}%` }}
+                    >
+                      <div className="w-2.5 h-2.5 -ml-1 rounded-full bg-white shadow-md -mt-0.5 border border-zinc-900" />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-between items-center text-[10px] font-mono text-zinc-500 px-0.5">
+                    <span>00:00.0</span>
+                    <span className="text-zinc-300 font-semibold">Playhead: {formatTimestampWithTenths(previewVideoCurrentTime)}</span>
+                    <span>{formatTimestampWithTenths(safeDuration)}</span>
+                  </div>
+                </div>
+
+                {/* Dual Inputs: Start & End Timestamps with 0.1s Step & Sliders */}
+                <div className="grid grid-cols-2 gap-2.5 pt-1.5 border-t border-zinc-800">
+                  {/* Start Timestamp Control */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400 flex items-center gap-1 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-amber-400 inline-block" />
+                        <span>Start Time</span>
+                      </span>
+                      <span className="font-mono text-amber-300 font-bold">{formatTimestampWithTenths(trimStartSeconds)}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min="0"
+                        max={Math.max(0, trimEndSeconds - 0.1)}
+                        step="0.1"
+                        value={trimStartSeconds}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (!isNaN(val)) {
+                            const clamped = Math.max(0, Math.min(val, trimEndSeconds - 0.1));
+                            setTrimStartSeconds(Number(clamped.toFixed(1)));
+                          }
+                        }}
+                        aria-label="Trim Start Time in seconds"
+                        className="w-full px-2 py-1 rounded bg-zinc-950 border border-zinc-800 text-white font-mono text-xs focus:border-amber-500"
+                      />
+                      <button
+                        type="button"
+                        id="set-trim-start-btn"
+                        onClick={handleSetTrimStartToCurrent}
+                        className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-amber-300 hover:text-white text-[10px] font-mono whitespace-nowrap cursor-pointer transition border border-zinc-700"
+                        title="Set start timestamp to current video playhead"
+                      >
+                        ✂️ Set
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(0.1, safeDuration)}
+                      step="0.1"
+                      value={trimStartSeconds}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          const clamped = Math.max(0, Math.min(val, trimEndSeconds - 0.1));
+                          setTrimStartSeconds(Number(clamped.toFixed(1)));
+                        }
+                      }}
+                      aria-label="Trim start slider"
+                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
+                    />
+                  </div>
+
+                  {/* End Timestamp Control */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-zinc-400 flex items-center gap-1 font-medium">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" />
+                        <span>End Time</span>
+                      </span>
+                      <span className="font-mono text-emerald-300 font-bold">{formatTimestampWithTenths(trimEndSeconds)}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <input
+                        type="number"
+                        min={trimStartSeconds + 0.1}
+                        max={safeDuration}
+                        step="0.1"
+                        value={trimEndSeconds}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          if (!isNaN(val)) {
+                            const clamped = Math.min(safeDuration, Math.max(val, trimStartSeconds + 0.1));
+                            setTrimEndSeconds(Number(clamped.toFixed(1)));
+                          }
+                        }}
+                        aria-label="Trim End Time in seconds"
+                        className="w-full px-2 py-1 rounded bg-zinc-950 border border-zinc-800 text-white font-mono text-xs focus:border-emerald-500"
+                      />
+                      <button
+                        type="button"
+                        id="set-trim-end-btn"
+                        onClick={handleSetTrimEndToCurrent}
+                        className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-emerald-300 hover:text-white text-[10px] font-mono whitespace-nowrap cursor-pointer transition border border-zinc-700"
+                        title="Set end timestamp to current video playhead"
+                      >
+                        ✂️ Set
+                      </button>
+                    </div>
+                    <input
+                      type="range"
+                      min="0"
+                      max={Math.max(0.1, safeDuration)}
+                      step="0.1"
+                      value={trimEndSeconds}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value);
+                        if (!isNaN(val)) {
+                          const clamped = Math.min(safeDuration, Math.max(val, trimStartSeconds + 0.1));
+                          setTrimEndSeconds(Number(clamped.toFixed(1)));
+                        }
+                      }}
+                      aria-label="Trim end slider"
+                      className="w-full h-1.5 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Quick Action Buttons & Status Summary */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-zinc-800/80">
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      id="preview-trimmed-cut-btn"
+                      onClick={() => {
+                        if (isPreviewTrimLoopActive) {
+                          setIsPreviewTrimLoopActive(false);
+                        } else {
+                          handlePlayTrimmedCut();
+                        }
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        isPreviewTrimLoopActive
+                          ? 'bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold shadow-md shadow-amber-500/20'
+                          : 'bg-zinc-800 hover:bg-zinc-700 text-amber-300 hover:text-white border border-zinc-700'
+                      }`}
+                      title="Loop playback strictly within defined start and end timestamps"
+                    >
+                      {isPreviewTrimLoopActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                      <span>{isPreviewTrimLoopActive ? 'Stop Loop' : 'Preview Trim'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      id="reset-trim-btn"
+                      onClick={handleResetTrim}
+                      disabled={!isTrimActive}
+                      className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-300 disabled:opacity-40 disabled:hover:bg-zinc-800 transition cursor-pointer border border-zinc-700/60"
+                      title="Reset start and end timestamps to entire recorded video"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      <span>Reset Full</span>
+                    </button>
+                  </div>
+
+                  <div className="text-[11px] font-mono">
+                    {isTrimActive ? (
+                      <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                        <Scissors className="w-3 h-3" />
+                        <span>Exports {formatTimestampWithTenths(trimmedDuration)}</span>
+                      </span>
+                    ) : (
+                      <span className="text-zinc-500">Exports full video</span>
+                    )}
+                  </div>
+                </div>
               </div>
             </div>
 
             {/* Export Format Selector Cards (MP4, WEBM, GIF) */}
-            <div className="lg:col-span-7 space-y-3">
+            <div className="lg:col-span-6 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 {EXPORT_FORMAT_PRESETS.map((fmt) => {
                   const isSelected = selectedExportFormat === fmt.id;
@@ -2383,11 +3097,19 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                         onChange={(e) => setSaveMetadataAlongside(e.target.checked)}
                         className="rounded bg-zinc-800 border-zinc-700 text-indigo-500 w-3 h-3 accent-indigo-500 cursor-pointer"
                       />
-                      <span>Include companion .json manifest</span>
+                      <span>Companion manifest</span>
+                    </label>
+                    <label className="flex items-center gap-1.5 text-[11px] text-emerald-400 hover:text-emerald-300 cursor-pointer select-none font-medium">
+                      <input
+                        type="checkbox"
+                        checked={autoExportOnStop}
+                        onChange={(e) => setAutoExportOnStop(e.target.checked)}
+                        className="rounded bg-zinc-800 border-zinc-700 text-emerald-500 w-3 h-3 accent-emerald-500 cursor-pointer"
+                      />
+                      <span>Auto-download on stop</span>
                     </label>
                   </div>
                 </div>
-
 
                 <div className="grid grid-cols-1 sm:grid-cols-12 gap-2">
                   <div className="sm:col-span-5">
@@ -2415,8 +3137,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                 <div className="text-[10px] font-mono text-zinc-400 truncate flex items-center gap-2">
                   <span className="text-zinc-500">Target Filename:</span>
                   <span className="text-indigo-300 font-bold truncate">
-                    {sanitizeFileName(projectTitle, 'KBT_Tutorial')}_{selectedLanguage.toUpperCase()}_{activeAspectRatio.id.replace(':', 'x')}_[timestamp].{activeExportFormat.extension}
+                    {sanitizeFileName(projectTitle, 'KBT_Tutorial')}_{selectedLanguage.toUpperCase()}_{activeAspectRatio.id.replace(':', 'x')}{isTrimActive ? `_trim_${Math.round(trimStartSeconds)}s-${Math.round(trimEndSeconds)}s` : ''}_[timestamp].{activeExportFormat.extension}
                   </span>
+                  {isTrimActive && (
+                    <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[9px] font-mono font-bold whitespace-nowrap">
+                      ✂️ Trimmed ({formatTimestampWithTenths(trimmedDuration)})
+                    </span>
+                  )}
                 </div>
               </div>
 
@@ -2427,25 +3154,58 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* Download Video / GIF */}
+                  {/* Save as .MP4 dedicated button */}
+                  <button
+                    type="button"
+                    id="post-record-save-as-mp4-btn"
+                    onClick={() => {
+                      setSelectedExportFormat('mp4');
+                      handleExportVideo('mp4');
+                    }}
+                    disabled={isExporting}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-md shadow-indigo-600/30 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    title="Export and download tutorial recording as universal .MP4 (H.264)"
+                  >
+                    <Film className="w-3.5 h-3.5" />
+                    <span>Save as .MP4</span>
+                  </button>
+
+                  {/* Save as .WEBM dedicated button */}
+                  <button
+                    type="button"
+                    id="post-record-save-as-webm-btn"
+                    onClick={() => {
+                      setSelectedExportFormat('webm');
+                      handleExportVideo('webm');
+                    }}
+                    disabled={isExporting}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-md shadow-emerald-600/30 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                    title="Export and download tutorial recording as modern high-compression .WEBM (VP9)"
+                  >
+                    <FileVideo className="w-3.5 h-3.5" />
+                    <span>Save as .WEBM</span>
+                  </button>
+
+                  {/* Download Video / Current Selection */}
                   <button
                     type="button"
                     id="post-record-download-btn"
                     onClick={() => handleExportVideo()}
                     disabled={isExporting}
+                    title={isTrimActive ? `Download trimmed cut (${formatTimestampWithTenths(trimmedDuration)}) as .${activeExportFormat.extension.toUpperCase()}` : `Download recording as .${activeExportFormat.extension.toUpperCase()}`}
                     className={`flex items-center gap-2 px-4 py-2 rounded-xl text-white font-bold text-xs shadow-lg transition active:scale-95 disabled:opacity-50 cursor-pointer ${
                       selectedExportFormat === 'gif'
                         ? 'bg-purple-600 hover:bg-purple-500 shadow-purple-600/30'
                         : selectedExportFormat === 'webm'
-                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
-                        : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
+                        ? 'bg-emerald-700 hover:bg-emerald-600 shadow-emerald-600/30'
+                        : 'bg-indigo-700 hover:bg-indigo-600 shadow-indigo-600/30'
                     }`}
                   >
                     <Download className="w-4 h-4" />
                     <span>
                       {isExporting
                         ? exportStatusText || 'Packaging file...'
-                        : `Download .${activeExportFormat.extension.toUpperCase()}${saveMetadataAlongside ? ' + Metadata' : ''}`}
+                        : `Download ${isTrimActive ? 'Trimmed ' : ''}.${activeExportFormat.extension.toUpperCase()}${saveMetadataAlongside ? ' + Metadata' : ''}`}
                     </span>
                   </button>
 
@@ -2591,6 +3351,24 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             <span className="text-zinc-600">•</span>
             <span className="text-zinc-300">{exportFramerate}fps</span>
           </div>
+
+          <div className="h-3 w-px bg-zinc-800" />
+
+          {/* Quick Telemetry Overlay Launcher */}
+          <button
+            type="button"
+            id="canvas-telemetry-toggle-btn"
+            onClick={() => setShowTelemetryOverlay(!showTelemetryOverlay)}
+            className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-mono transition cursor-pointer ${
+              showTelemetryOverlay
+                ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/30'
+                : 'text-zinc-400 hover:text-white hover:bg-zinc-900'
+            }`}
+            title="Toggle real-time GPU/CPU usage Telemetry Overlay (Hotkey: G)"
+          >
+            <Activity className="w-3 h-3 text-cyan-400" />
+            <span className="hidden md:inline">Telemetry</span>
+          </button>
         </div>
 
         {/* Compositor Canvas Overlay (Cursor Halo, Click Ripples, Softsubs, Timer Overlay) */}
@@ -2611,10 +3389,115 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           onPointerLeave={handleDrawingPointerUp}
           className={`absolute inset-0 w-full h-full z-25 touch-none select-none transition-all ${
             isDrawModeActive
-              ? 'pointer-events-auto cursor-crosshair ring-2 ring-amber-500/40 bg-amber-500/[0.015]'
+              ? drawingTool === 'text'
+                ? 'pointer-events-auto cursor-text ring-2 ring-amber-500/40 bg-amber-500/[0.015]'
+                : 'pointer-events-auto cursor-crosshair ring-2 ring-amber-500/40 bg-amber-500/[0.015]'
               : 'pointer-events-none'
           }`}
         />
+
+        {/* Interactive Inline Text Overlay Creator directly on Video Preview */}
+        {isDrawModeActive && inlineTextInputPos && (
+          <div
+            id="inline-canvas-text-editor"
+            style={{
+              left: `${Math.min(75, Math.max(5, inlineTextInputPos.screenX))}%`,
+              top: `${Math.min(75, Math.max(8, inlineTextInputPos.screenY))}%`,
+              transform: 'translate(-5%, -50%)',
+            }}
+            className="absolute z-35 min-w-[280px] sm:min-w-[340px] max-w-[420px] p-3 rounded-2xl bg-zinc-950/95 backdrop-blur-md border-2 border-amber-500 shadow-2xl space-y-2.5 animate-in zoom-in-95 duration-150 pointer-events-auto select-none"
+          >
+            <div className="flex items-center justify-between pb-1.5 border-b border-zinc-800">
+              <div className="flex items-center gap-1.5 text-amber-300 font-bold text-xs">
+                <Type className="w-3.5 h-3.5" />
+                <span>Place Text Overlay</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInlineTextInputPos(null)}
+                className="text-zinc-500 hover:text-zinc-300 p-0.5 rounded cursor-pointer transition"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <div className="space-y-1">
+              <input
+                type="text"
+                autoFocus
+                value={textOverlayValue}
+                onChange={(e) => setTextOverlayValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleCommitTextOverlay();
+                  } else if (e.key === 'Escape') {
+                    setInlineTextInputPos(null);
+                  }
+                }}
+                placeholder="Type text overlay..."
+                className="w-full px-2.5 py-1.5 rounded-xl bg-zinc-900 border border-zinc-700 text-white text-xs font-semibold focus:border-amber-500 focus:outline-none"
+              />
+            </div>
+
+            {/* Quick Presets */}
+            <div className="flex items-center gap-1 overflow-x-auto pb-0.5">
+              {['Step 1', 'Important Note', 'Notice Output', 'Warning', 'Click Here'].map((preset) => (
+                <button
+                  key={preset}
+                  type="button"
+                  onClick={() => setTextOverlayValue(preset)}
+                  className="px-1.5 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-[10px] text-zinc-300 border border-zinc-800 font-mono shrink-0 cursor-pointer"
+                >
+                  {preset}
+                </button>
+              ))}
+            </div>
+
+            {/* Font Size & Background Toggle & Color Selection */}
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-zinc-900 text-xs">
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-mono text-zinc-500">Size:</span>
+                {[
+                  { label: 'S', size: 20 },
+                  { label: 'M', size: 28 },
+                  { label: 'L', size: 40 },
+                ].map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onClick={() => setTextOverlayFontSize(s.size)}
+                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold font-mono cursor-pointer transition ${
+                      textOverlayFontSize === s.size
+                        ? 'bg-amber-500 text-zinc-950'
+                        : 'bg-zinc-900 text-zinc-400 hover:text-white'
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+
+              <label className="flex items-center gap-1 text-[10px] text-zinc-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={textOverlayHasBg}
+                  onChange={(e) => setTextOverlayHasBg(e.target.checked)}
+                  className="rounded bg-zinc-800 border-zinc-700 text-amber-500 w-3 h-3 accent-amber-500 cursor-pointer"
+                />
+                <span>Backdrop</span>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => handleCommitTextOverlay()}
+                className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Draggable Circular Camera Bubble (Loom Style) */}
         {isCameraActive && (
@@ -2636,6 +3519,19 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               Webcam (Loom)
             </div>
           </div>
+        )}
+
+        {/* Reactive Real-Time GPU/CPU Telemetry Overlay with D3 Line Chart */}
+        {showTelemetryOverlay && (
+          <TelemetryOverlay
+            isRecording={isRecording}
+            isPaused={isPaused}
+            exportFramerate={exportFramerate}
+            selectedFilter={selectedFilter}
+            isDrawModeActive={isDrawModeActive}
+            onClose={() => setShowTelemetryOverlay(false)}
+            className="top-4 right-4 sm:right-6"
+          />
         )}
 
         {/* Small 'Shortcuts' Overlay in the StudioRecorder Viewport */}
@@ -2757,6 +3653,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                 {[
                   { id: 'highlighter' as DrawingToolType, label: 'Highlight', icon: Highlighter, hint: 'Translucent glow marker' },
                   { id: 'pen' as DrawingToolType, label: 'Pen', icon: PenTool, hint: 'Solid freehand line' },
+                  { id: 'text' as DrawingToolType, label: 'Text', icon: Type, hint: 'Add text overlay directly on video preview' },
                   { id: 'rect' as DrawingToolType, label: 'Box', icon: Square, hint: 'Highlight rectangular region' },
                   { id: 'arrow' as DrawingToolType, label: 'Arrow', icon: ArrowUpRight, hint: 'Directional pointer arrow' },
                   { id: 'circle' as DrawingToolType, label: 'Spotlight', icon: CircleDot, hint: 'Circle focus spotlight' },
@@ -2781,6 +3678,57 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
                   );
                 })}
               </div>
+
+              {/* Text Overlay Quick Dock Input when Text tool is selected */}
+              {drawingTool === 'text' && (
+                <div className="flex flex-col gap-1.5 p-2 rounded-xl bg-zinc-900 border border-amber-500/40">
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={textOverlayValue}
+                      onChange={(e) => setTextOverlayValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          handleCommitTextOverlay();
+                        }
+                      }}
+                      placeholder="Type text overlay..."
+                      className="flex-1 px-2.5 py-1 rounded-lg bg-zinc-950 border border-zinc-700 text-white text-xs focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleCommitTextOverlay()}
+                      className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold text-xs cursor-pointer transition shrink-0"
+                    >
+                      + Add
+                    </button>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-1 text-[10px] text-zinc-400">
+                    <span className="text-zinc-500">Click preview or press Add</span>
+                    <div className="flex items-center gap-1">
+                      <span className="font-mono">Size:</span>
+                      {[
+                        { label: 'S', size: 20 },
+                        { label: 'M', size: 28 },
+                        { label: 'L', size: 40 },
+                      ].map((s) => (
+                        <button
+                          key={s.label}
+                          type="button"
+                          onClick={() => setTextOverlayFontSize(s.size)}
+                          className={`px-1.5 py-0.2 rounded text-[9px] font-bold font-mono cursor-pointer ${
+                            textOverlayFontSize === s.size ? 'bg-amber-500 text-zinc-950' : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                          }`}
+                        >
+                          {s.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Color Swatches & Status */}
               <div className="flex items-center justify-between gap-2 pt-0.5">

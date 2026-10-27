@@ -189,6 +189,13 @@ export interface ProjectRecordingMetadata {
     text: string;
   }>;
 
+  trimSettings?: {
+    isTrimmed: boolean;
+    trimStartSeconds: number;
+    trimEndSeconds: number;
+    originalDurationSeconds: number;
+    trimmedDurationSeconds: number;
+  };
   generator: string;
   version: string;
 }
@@ -201,11 +208,12 @@ export interface SavedProjectSettings {
   exportQuality: '1080p' | '720p';
   exportFramerate: 30 | 60;
   saveMetadataAlongside: boolean;
+  autoExportOnStop?: boolean;
   selectedFilter?: ColorFilterId;
   lastSavedAt?: string;
 }
 
-export type DrawingToolType = 'pen' | 'highlighter' | 'rect' | 'arrow' | 'circle';
+export type DrawingToolType = 'pen' | 'highlighter' | 'rect' | 'arrow' | 'circle' | 'text';
 
 export interface DrawingPoint {
   x: number;
@@ -218,8 +226,15 @@ export interface DrawingStroke {
   color: string;
   strokeWidth: number;
   points: DrawingPoint[];
+  text?: string;
+  fontSize?: number;
+  hasBackground?: boolean;
   timestamp?: number;
 }
-
-
-
+export interface TelemetryDataPoint {
+  timestamp: number;
+  cpu: number;
+  gpu: number;
+  fps: number;
+  memoryMb?: number;
+}
