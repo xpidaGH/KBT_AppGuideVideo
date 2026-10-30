@@ -1,384 +1,208 @@
 # KBT_AppGuideVideo - Software User Guide & Capstone Engineering Suite
 
-[![Version](https://img.shields.io/badge/version-2.5.0-blue.svg)](https://github.com/kbt-systems/kbt-appguidevideo)
-[![Languages](https://img.shields.io/badge/languages-22%20Supported-success.svg)](https://github.com/kbt-systems/kbt-appguidevideo)
-[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
-[![Hotkeys](https://img.shields.io/badge/shortcuts-Global%20Hotkeys-indigo.svg)](#keyboard-shortcuts--hotkeys)
+[![Version](https://img.shields.io/badge/version-3.0.0-blue.svg)](https://github.com/kbt-systems/kbt-appguidevideo)
+[![Languages](https://img.shields.io/badge/languages-22%20Supported-success.svg)](#22-supported-languages)
+[![Firebase](https://img.shields.io/badge/database-Firestore%20Sync-orange.svg)](#firebase-firestore-cloud-sync--project-archive)
+[![AI Subtitles](https://img.shields.io/badge/AI-Gemini%20API-purple.svg)](#ai-powered-voiceover-synthesis--smart-scripting-gemini-api)
+[![Audio](https://img.shields.io/badge/audio-LUFS%20Normalization%20%2B%20Noise%20Gate-cyan.svg)](#lufs-loudness-normalization--smart-audio-mixer)
+[![Analytics](https://img.shields.io/badge/Recharts-Export%20Analytics-emerald.svg)](#recharts-export-analytics--benchmarklab-debugger)
+[![Voice Commands](https://img.shields.io/badge/speech-Web%20Speech%20API-red.svg)](#ai-powered-voice-command-recognition-system)
 
-An advanced multi-platform screen recording, telemetry logging, and interactive tutorial creation studio designed for international computer science and systems programming students.
+An enterprise-grade multimedia capture, video encoding, systems telemetry, multi-track audio engineering, and interactive tutorial authoring suite designed for international computer science and systems programming students.
 
-Inspired by **OBS Studio, Camtasia, ScreenFlow, Scribe, Guidde, and Loom**, this system combines rapid cross-platform delivery with low-level systems architectures, SIMD vectorization algorithms, and distributed render pipelines across **22 international programming languages**.
-
----
-
-## 🌟 Key Features
-
-- 🎥 **Studio Screen & Camera Recorder**:
-  - Live capture via `getDisplayMedia` (native screen sharing) or interactive embedded IDE Simulator.
-  - Floating, draggable Loom-style circular webcam bubble.
-  - Multi-layer canvas compositor with mouse click ripple animations and cursor highlight halos.
-  - Real-time Web Audio API VU meter and Fast Fourier Transform (FFT) waveform.
-  - **Real-Time Recording Timer Overlay**: Configurable, toggleable recording clock directly composited onto video frames (`DEFAULT_STUDIO_CONFIG`, `TIMER_OVERLAY_STYLE`).
-  - **Flexible Multi-Format Export Engine (MP4, WEBM, GIF)**:
-    - **MP4 (H.264 / AAC)**: Universal industry-standard container for YouTube, course portals, Canvas LMS, and cross-platform playback.
-    - **WEBM (VP9 / Opus)**: Lightweight, high-efficiency open web format for HTML5 streaming without re-encoding delay.
-    - **GIF (GIF89a Looping Animation)**: Client-side animated GIF compiler for embedding short clips directly in GitHub READMEs, PR reviews, bug reports, and Discord/Slack chats.
-    - **Post-Recording Export Hub**: Dedicated review deck showing recorded video preview, format comparison cards, single-click downloads, and bundled subtitle (`.vtt` / `.srt`) exports.
-
-- 🎨 **Real-Time Video Filter & Color-Correction LUT Pipeline**:
-  - Live hardware-accelerated 2D canvas color grading pipeline (`ctx.filter` & pixel-level algorithmic LUT).
-  - Presets: **Normal (Raw)**, **Grayscale (ITU-R BT.709)**, **Sepia (Vintage Warm Film)**, **High Contrast (Punchy Clarity)**, **Warm Sunlight (Golden Hour)**, **Cyberpunk (Teal & Cool Cyan)**, **Bleach Bypass (Cinema Silver)**, and **Invert (Thermal / Night Vision)**.
-  - Active LUT is rendered directly into the composited video stream (`canvas.captureStream()`) so exported MP4 and WebM videos have the chosen color grading baked in.
-  - Interactive top-deck dropdown selector, quick-access preset swatch bar, and real-time canvas watermark HUD badge (`LUT: [PRESET]`).
-
-- ⌨️ **Global Keyboard Listener & Shortcuts HUD**:
-  - App-level global keyboard listener (`window.addEventListener('keydown')`) with intelligent form-input bypass.
-  - Space key toggle for starting and stopping recording (`e.preventDefault()` prevents unwanted scrolling).
-  - Dedicated hotkey `F` to cycle through color-correction LUT presets in real time.
-  - Dedicated hotkey `T` to toggle real-time recording timer overlay on the video canvas.
-  - Dedicated hotkey `C` to toggle circular camera bubble.
-  - Dedicated hotkey `M` to toggle microphone audio track.
-  - Dedicated hotkey `P` to trigger instant TTS preview in the active language.
-  - Small, sleek **Shortcuts Overlay** HUD in `StudioRecorder` displaying active key mappings and recording state.
-
-- 🗣️ **22-Language Text-to-Speech (TTS) & Volume Control**:
-  - Direct integration with native browser `window.speechSynthesis`.
-  - Configurable `ttsVolume` slider (0.0 to 1.0) linked directly to `SpeechSynthesisUtterance.volume`.
-  - **Preview TTS** button to immediately verify audio settings using localized phrases in all 22 supported languages.
-  - System voice auto-matcher selecting the optimal voice matching the language's BCP-47 tag.
-
-- 📝 **Visual Annotations & Captions Engine**:
-  - **Timed Text Metadata Tracks (Softsubs)**: Timestamped cue editor with direct export to **WebVTT (`.vtt`)** and **SubRip (`.srt`)** for YouTube and LMS platforms.
-  - **Automated Scribe/Guidde Workflow Guides**: Captures clicks, coordinates, keystrokes, and DOM mutations into step-by-step interactive documentation with code blocks.
-  - **22 International Languages**: One-click instant translation of tutorials and guides across 22 languages.
-
-- 💻 **22-Language Production Capstone Blueprints Hub**:
-  - Complete, runnable, syntax-highlighted code modules covering all 5 architectural pillars.
-  - Interactive benchmarks & simulators (SIMD AVX2 color conversion speed, Rust lock-free ring buffer, MATLAB audio noise filter, COBOL batch manifest billing report, and SQL telemetry queries).
+Inspired by **OBS Studio, Camtasia, ScreenFlow, Scribe, Guidde, and Loom**, this system combines rapid cross-platform video capture with low-level systems architectures, SIMD vectorization algorithms, and distributed render pipelines across **22 international programming languages**.
 
 ---
 
-## ⌨️ Keyboard Shortcuts & Hotkeys
+## 🌟 Comprehensive Feature Suite
 
-The application features a root-level global keyboard listener in the `App` component that continuously captures hotkeys while automatically ignoring input fields, textareas, and dropdown menus:
+### 1. ⚡ Fast Export Hotkey & Dedicated Export Configuration
+- **Instant Hotkey (<kbd>Ctrl+E</kbd> / <kbd>Cmd+E</kbd>)**: Triggers immediate export of the active recording project based on current format and quality parameters without opening multi-step dialogs.
+- **Advanced Export (<kbd>Ctrl+Shift+E</kbd>)**: Opens the quality preset and configuration modal.
+- **Export Sub-Menu in Settings**: Dedicated section inside `SettingsModal` allowing users to bind and customize distinct hotkeys for Fast Export versus Advanced Export via the `kbt-hotkey` event bus.
+- **Reset Studio Hotkey (<kbd>Shift+R</kbd>)**: Instantly resets color filters, screen annotation strokes, crop framing, and project metadata to default values.
 
-| Key | Action | Description |
+### 2. 🎙️ AI-Powered Voice Command Recognition System
+- **Hands-Free Control via Web Speech API**: Integrated voice controller running continuous speech recognition mapped directly to the `kbt-hotkey` event bus.
+- **Supported Natural Language Phrases**:
+  - *"start recording"*, *"record"*, *"begin recording"* &rarr; `TOGGLE_RECORDING`
+  - *"stop recording"*, *"finish recording"*, *"stop"* &rarr; `TOGGLE_RECORDING`
+  - *"toggle camera"*, *"camera"*, *"webcam"* &rarr; `TOGGLE_CAM`
+  - *"toggle mic"*, *"mute microphone"* &rarr; `TOGGLE_MIC`
+  - *"fast export"*, *"quick export"* &rarr; `FAST_EXPORT`
+  - *"reset studio"*, *"clear studio"* &rarr; `RESET_STUDIO`
+  - *"toggle draw"*, *"highlight"* &rarr; `TOGGLE_DRAW`
+  - *"toggle crop"* &rarr; `TOGGLE_CROP`
+  - *"toggle timer"* &rarr; `TOGGLE_TIMER`
+- Visual pulsing microphone HUD displays real-time transcript and confidence feedback.
+
+### 3. 🎥 Multi-Cam Director & Picture-in-Picture (PiP) Layout
+- **Multi-Source Video Input Switching**: Switch seamlessly between Primary display, IDE simulator, secondary webcam, or external hardware capture cards.
+- **Configurable PiP Framing**:
+  - **Corner Positioning**: Top-Left, Top-Right, Bottom-Left, Bottom-Right.
+  - **Custom Geometry**: Circle (Loom bubble), Rounded Rectangle, or Square.
+  - **Size Scaling**: Small (100px), Medium (150px), Large (220px).
+  - **Accent Borders & Mirroring**: Custom border colors and horizontal camera flip.
+
+### 4. 📈 Real-Time Video Encoding Progress Bar & Auditory Feedback
+- **Header Progress Percentage Pill**: Displays dynamic encoding percentage (`Exporting 45%...`) in the top studio navigation deck.
+- **Bottom Encoding Progress Bar**: Full-width gradient progress bar (`0%` to `100%`) positioned beneath the main stage during video rendering.
+- **Web Audio Success Chime**: Non-intrusive auditory confirmation melody synthesized directly via the Web Audio API on successful render completion (D5 &rarr; A5 &rarr; F#6).
+
+### 5. 📋 Pre-Export Summary & Detailed Post-Export Analytics Modal
+- **Pre-Export Summary**: Displays calculated estimate of duration, bitrate, and expected file size based on resolution and selected codec preset.
+- **Post-Export Report Modal**: Automatically launches upon export completion:
+  - Total render time (seconds) and effective encoding speed.
+  - Final file size vs. estimated uncompressed raw size with exact storage savings (e.g. *72% savings*).
+  - Average bitrate (Mbps) and dropped frame count (0 drops).
+  - One-click **Download File** and **Share Snippet** buttons with centered animated success badge.
+
+### 6. 🗂️ Global Export Templates (Firestore Synced)
+- **Instant Mode Switching**:
+  - **Presentation Ready**: 1080p 60fps MP4 (H.264), -14 LUFS loudness target, crisp standard grading.
+  - **Mobile Social**: 1080x1920 (9:16) 30fps MP4, -11 LUFS target, punchy contrast LUT for TikTok/Reels/Shorts.
+  - **Raw Archive**: 1080p 60fps WebM (VP9 lossless profile), -23 LUFS broadcast standard.
+- **Cloud Persistence**: Saved templates sync automatically across user devices via Firebase Firestore (`/exportTemplates`).
+
+### 7. 📊 BenchmarkLab: Recharts Export Analytics & Hotkey Event Bus Debugger
+- **Visual Analytics Powered by Recharts**:
+  - **Average Render Time Bar Chart**: Render durations across MP4, WebM, and GIF formats.
+  - **Export Format Distribution Pie Chart**: Visual breakdown of most utilized export containers.
+  - **Total File Size Generated Area Chart**: Cumulative bytes saved and bandwidth consumed.
+  - **Live Hardware Performance Stream Line Chart**: Live tracking of frame drop rate, encoding speed, and CPU utilization.
+- **Hotkey Event Bus Debugger Modal**: Interactive inspector listing all active window event listeners with manual event triggers to verify event bus routing.
+
+### 8. 🐙 Version Control Tab: GitHub Repository Metadata Sync
+- **GitHub Authentication**: Connect via Firebase GitHub Auth or Personal Access Token (PAT) with `repo` scope permissions.
+- **Repository Browser & Tree View**: Fetches remote repository list and visualizes full project tree structure with selectable checkboxes.
+- **One-Click Metadata Push**: Serializes current studio state, subtitles, scribe steps, and configuration into `kbt_studio_metadata.json` and commits directly to the remote repository via the GitHub REST API (`/repos/{owner}/{repo}/contents/{path}`).
+- **Header Sync Badge**: Live pill indicator in the header reflecting `'Synced'`, `'Syncing'`, or `'Unsynced'` status.
+
+### 9. 🎚️ LUFS Loudness Normalization & Smart Audio Mixer
+- **ITU-R BS.1770-4 Standard Normalization**: Built-in K-weighting pre-filter and psychoacoustic loudness measurement.
+- **Preset Loudness Targets**:
+  - `-14 LUFS`: YouTube & Streaming Video standard.
+  - `-16 LUFS`: Apple Podcasts & Voiceover standard.
+  - `-23 LUFS`: EBU R128 / ATSC A/85 Television Broadcast standard.
+  - `-11 LUFS`: Mobile Social (TikTok, Instagram Reels).
+- **Multi-Track Mixer**: Independent gain sliders, mute switches, digital noise gate (-42 dB threshold), and dynamic range compressor.
+
+### 10. 🤖 AI-Powered Voiceover Synthesis & Smart Scripting (Gemini API)
+- **Voiceover Synthesis Studio**: Converts written lesson scripts into multi-language speech tracks using Gemini 3.8 Flash (`/api/gemini/voiceover`).
+- **Selectable Voice Personas**: Puck (Energetic Engineer), Charon (Authoritative Architect), Kore (Warm Educator), Fenrir (Technical Deep-Dive), and Aoede (Expressive Narrator).
+- **Smart Scripting Assistant**: Analyzes project metadata and suggests structured tutorial outline headers and timestamps using Gemini 3.8 Flash (`/api/gemini/outline`).
+
+### 11. 🖼️ Project Archive Sidebar with Static Screenshot Thumbnails
+- **Instant Visual Identification**: Every saved session automatically captures and stores a static thumbnail JPEG snapshot directly from the recording canvas.
+- **Archive Cards**: Displays thumbnail image preview, duration badge, resolution, aspect ratio, and one-click session restore.
+
+### 12. ⚡ Studio Actions 1-Click Execution Sidebar
+- **Visual Control Alternative**: Retractable sidebar listing all recording and studio commands with one-click buttons, providing complete workflow control for users who prefer visual interaction over hotkeys.
+
+### 13. 🔍 Global Search Modal (<kbd>Ctrl+K</kbd>) & Accessibility Focus Rings
+- **Unified Quick Finder**: Instant search across blueprints, documentation, and saved recording sessions.
+- **Accessibility Hardening**: Distinct, accessible Tailwind focus rings (`focus-visible:ring-2 focus-visible:ring-indigo-500`) applied to all interactive elements.
+
+### 14. 🌓 Global Dark / Light UI Theme Switcher
+- **Tailwind Dark Mode**: Seamlessly toggles between sleek dark studio theme and high-contrast light theme with persistent storage in localStorage.
+
+---
+
+## ⌨️ Default Keyboard Shortcuts
+
+| Shortcut | Action | Description |
 |---|---|---|
-| <kbd>Space</kbd> | `TOGGLE_RECORDING` | Starts or stops the recording session (prevents page scroll) |
-| <kbd>F</kbd> | `CYCLE_FILTER` | Cycles through real-time video color-correction LUT presets |
-| <kbd>T</kbd> | `TOGGLE_TIMER` | Toggles the real-time recording timer/clock overlay on canvas |
-| <kbd>C</kbd> | `TOGGLE_CAM` | Toggles the circular Loom-style camera bubble on/off |
-| <kbd>M</kbd> | `TOGGLE_MIC` | Toggles the microphone audio track on/off |
-| <kbd>P</kbd> | `PREVIEW_TTS` | Triggers a quick TTS speech synthesis test in selected language |
-
-These shortcuts are mapped in the small **Shortcuts Overlay** inside the `StudioRecorder` viewport. Users can collapse or expand this HUD anytime via the `Shortcuts` button in the top deck or the floating viewport pill.
-
----
-
-## 🧪 How Students Can Test applet
-
-Students, educators, and evaluators can verify the entire studio pipeline by following this step-by-step interactive test protocol:
-
-### Step 1: Verify Global Hotkeys & Shortcuts Overlay
-1. Ensure focus is outside any text inputs (click anywhere in the main studio viewport).
-2. Press <kbd>Space</kbd>:
-   - Observe that the recording starts immediately (`Start Recording` switches to active recording mode, timer starts counting, audio meter pulses).
-   - Press <kbd>Space</kbd> again to stop recording and trigger the export preparation.
-3. Press <kbd>F</kbd>:
-   - Observe that the active Color-Correction LUT cycles in real-time (Normal -> Grayscale -> Sepia -> Hi-Contrast -> Warm -> Cool -> Bleach -> Invert).
-   - Notice the live preview in the viewport and the `LUT: [NAME]` badge on the canvas update instantly.
-4. Press <kbd>T</kbd>:
-   - Notice the real-time recording clock overlay in the top-left corner of the video preview toggles on and off.
-   - The checkbox labeled `Timer Overlay` in the top control deck updates in sync.
-5. Press <kbd>C</kbd>:
-   - Notice the circular Loom-style webcam bubble toggles visibility.
-6. Press <kbd>M</kbd>:
-   - Notice the microphone track toggles between active and muted.
-7. Press <kbd>P</kbd>:
-   - Listen to the browser's TTS synthesis voice recite the test phrase in the currently active language at the configured volume.
-8. Inspect the **Shortcuts Overlay** in the bottom-left of the studio viewport:
-   - Click the `X` button to minimize to a compact pill button.
-   - Click the pill or the `Shortcuts` button in the top deck to expand the HUD back.
-
-### Step 2: Test Timer Overlay Customization & Canvas Compositing
-1. Check the `Timer Overlay` checkbox (`#recording-timer-overlay-checkbox`) or press <kbd>T</kbd>.
-2. When recording is active, notice the timer badge displays:
-   - A pulsing red dot indicating active recording.
-   - Formatted duration counter `REC HH:MM:SS`.
-   - Crisp rendering on top of the compositor canvas at 60 FPS.
-3. When recording is stopped or idle, the overlay shows `IDLE 00:00:00` with an emerald indicator.
-
-### Step 3: Test 22-Language TTS Voice & Volume Control
-1. In the top control deck, locate the **TTS Vol** slider (`#tts-volume-slider-top`).
-2. Slide the volume to `30%`, then click the **Preview TTS** button (`#preview-tts-button`) or press <kbd>P</kbd>.
-   - Hear the synthesized utterance play at lower volume.
-3. Slide the volume to `100%` and click **Preview TTS** again.
-   - Hear the utterance speak at full volume.
-4. Click the speaker icon to test one-click mute (0%) and unmute (100%).
-5. Change the app language in the top bar (e.g., from English to French, Japanese, German, or Hindi):
-   - Click **Preview TTS** to verify that the speech engine switches to the native test phrase and corresponding BCP-47 voice.
-
-### Step 4: Test Real-Time Video Filter & Color-Correction LUT Pipeline
-1. In the top deck, click the **LUT: [Name]** dropdown button (`#color-filter-lut-dropdown-btn`) or use the **Color LUT** quick preset pill bar:
-   - Select **Grayscale**: verify black-and-white monochrome tone (ITU-R BT.709 standard).
-   - Select **Sepia**: verify vintage warm amber grading.
-   - Select **Hi-Contrast**: verify punchy contrast expansion and boosted highlight clarity.
-   - Select **Warm LUT** or **Cool Teal**: verify color temperature balance shift.
-   - Select **Invert**: verify inverted tonal luminescence for dark-mode thermal inspections.
-2. Verify that the canvas watermark badge in the top-right corner displays `LUT: [NAME]`.
-3. Press <kbd>Space</kbd> to record a short clip with an active filter applied, then export to MP4/WebM:
-   - Verify that the exported video contains the filtered color correction burnt directly into the video stream before encoding.
-
-### Step 5: Test Interactive IDE Simulator & Automated Scribe Step Capture
-1. In the studio viewport, ensure `Embedded IDE Simulator` is selected.
-2. Click on the buttons inside the simulator (`Run Build`, `Toggle Theme`, or input test text):
-   - Notice the expanding ripple rings and cursor halo rendered on the compositor canvas.
-   - Check the **Visual Annotations Drawer** below the viewport: new workflow steps are automatically captured with precise coordinates and timestamps.
-3. Click **Add Step** or edit existing steps:
-   - Edit titles, descriptions, and code snippets.
-   - Switch between **Timed Softsubs** and **Workflow Guide (Scribe)** modes.
-4. Click **Export WebVTT (.vtt)** or **Export SubRip (.srt)**:
-   - Verify that standard timestamped caption files download immediately.
-
-### Step 6: Test Hardware Container Export (MP4 / WebM)
-1. Select output format quality (e.g. `1080p Full HD` at `60 FPS`).
-2. Record for at least 3–5 seconds using <kbd>Space</kbd>.
-3. Click **Stop & Export** or **Export MP4**:
-   - The system muxes the recorded chunks into an MP4/WebM video container and initiates automatic download.
-   - Open the downloaded video in VLC, QuickTime, or Chrome to verify audio/video sync, color LUT grading, and canvas graphics.
-
-### Step 7: Test Systems Capstone Blueprints Hub & Benchmark Lab
-1. Click the **Blueprints Hub** tab in the navigation bar:
-   - Explore all 22 programming languages categorized by the 5 architectural pillars.
-   - Click through C++, Rust, Kotlin, Go, Python, and COBOL to inspect production source code.
-2. Click the **Benchmark Lab** tab:
-   - Run the **AVX2 SIMD vs Scalar Benchmark** to measure throughput and speedup ratios.
-   - Run the **Rust Lock-Free Ring Buffer Simulator** to inspect thread-safe packet transfer with zero drops.
+| <kbd>Ctrl+E</kbd> | `FAST_EXPORT` | Immediately render and export active project |
+| <kbd>Ctrl+Shift+E</kbd> | `ADVANCED_EXPORT` | Open export options and quality preset dialog |
+| <kbd>Shift+R</kbd> | `RESET_STUDIO` | Reset filters, annotations, crop, and metadata |
+| <kbd>Space</kbd> | `TOGGLE_RECORDING` | Start or stop video recording |
+| <kbd>X</kbd> | `TOGGLE_CROP` | Toggle interactive video cropping tool |
+| <kbd>F</kbd> | `CYCLE_FILTER` | Cycle through color grading LUTs and retro filters |
+| <kbd>T</kbd> | `TOGGLE_TIMER` | Toggle on-canvas timer overlay |
+| <kbd>C</kbd> | `TOGGLE_CAM` | Toggle camera bubble |
+| <kbd>M</kbd> | `TOGGLE_MIC` | Toggle microphone audio track |
+| <kbd>P</kbd> | `PREVIEW_TTS` | Preview TTS speech synthesis in active language |
+| <kbd>D</kbd> | `TOGGLE_DRAW` | Toggle real-time screen drawing & highlighter |
+| <kbd>G</kbd> | `TOGGLE_TELEMETRY` | Toggle real-time GPU/CPU D3 telemetry overlay |
+| <kbd>Ctrl+K</kbd> | `GLOBAL_SEARCH` | Open Global Search modal |
 
 ---
 
-## 📦 Cross-Platform Packaging
+## 🏗️ Architecture & Technology Stack
 
-The KBT_AppGuideVideo suite is engineered for cross-platform deployment across Web (PWA), Desktop (Windows, macOS, Linux), and Mobile (Android, iOS).
-
-```
-                            [ KBT_AppGuideVideo Codebase ]
-                                          │
-            ┌─────────────────────────────┼─────────────────────────────┐
-            ▼                             ▼                             ▼
-    [ Progressive Web App ]     [ Desktop Application ]       [ Mobile Application ]
-    • Vite PWA Plugin           • Electron (electron-builder) • Capacitor Native Bridge
-    • Service Worker Caching    • Tauri (Rust Core)           • Android MediaProjection
-    • Web App Manifest          • Windows (.exe, .msi)        • iOS ReplayKit
-    • Offline Asset Precaching  • macOS (.dmg Universal)      • Foreground Daemon
-                                • Linux (.AppImage, .deb)
-```
-
-### 1. Web & Progressive Web App (PWA)
-
-The web bundle compiles as a zero-dependency client SPA optimized for modern browsers:
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Build production assets
-npm run build
-```
-
-To configure PWA offline installation:
-- **Manifest**: Located in `public/manifest.json` defining `display: standalone`, `theme_color: #09090b`, and icon assets (192x192, 512x512).
-- **Service Worker**: Cache shell assets, fonts, and language data tables for offline recording capability.
-- **HTTPS Requirement**: `navigator.mediaDevices.getDisplayMedia` requires a secure origin (HTTPS or `localhost`).
+| Layer | Technologies & Standards |
+|---|---|
+| **Frontend Framework** | React 19, TypeScript, Tailwind CSS v4, Lucide Icons |
+| **Video Compositor** | HTML5 Canvas 2D, MediaStream Capture, Interactive Cropping Engine, WebM VP9 / MP4 H.264 / GIF89a Encoders |
+| **Audio Pipeline** | Web Audio API, ITU-R BS.1770-4 LUFS Normalizer, MultiTrack Audio Mixer, Digital Noise Gate, Frequency Spectrum Visualizer |
+| **Speech & Voice** | Web Speech API (continuous voice command controller), SpeechSynthesisUtterance |
+| **Analytics & Viz** | Recharts (Bar, Pie, Area, Line charts for export metrics), D3.js (spline telemetry) |
+| **Version Control** | GitHub REST API (`v3`), Tree View selector, Commit & Push engine |
+| **AI Systems** | Google Gemini API (`gemini-3.8-flash`) for Smart Scripting and Voiceover synthesis |
+| **Database & Sync** | Firebase Firestore (security rules with ABAC), Firebase Auth |
+| **Backend Proxy** | Express full-stack entrypoint (`server.ts`), Vite middleware mode |
 
 ---
 
-### 2. Desktop Native Packaging (Windows, macOS, Linux)
+## 🌐 22 Supported Languages
 
-#### Option A: Electron Desktop Build
-
-Electron provides complete access to OS desktop capture APIs and native menus:
-
-```bash
-# 1. Install Electron and packager
-npm install -D electron electron-builder concurrently wait-on
-
-# 2. Package for Windows
-npx electron-builder --win nsis:ia32,x64
-
-# 3. Package for macOS (Universal Binary for Intel & Apple Silicon)
-npx electron-builder --mac dmg --universal
-
-# 4. Package for Linux
-npx electron-builder --linux AppImage deb
-```
-
-**Main Process Configuration (`electron/main.ts`)**:
-```ts
-import { app, BrowserWindow, desktopCapturer, session } from 'electron';
-
-let mainWindow: BrowserWindow | null = null;
-
-function createWindow() {
-  mainWindow = new BrowserWindow({
-    width: 1440,
-    height: 900,
-    minWidth: 1024,
-    minHeight: 700,
-    backgroundColor: '#09090b',
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      preload: __dirname + '/preload.js',
-    },
-  });
-
-  // Enable screen & window capture permissions
-  session.defaultSession.setDisplayMediaRequestHandler((request, callback) => {
-    desktopCapturer.getSources({ types: ['screen', 'window'] }).then((sources) => {
-      callback({ video: sources[0], audio: 'loopback' });
-    });
-  });
-
-  mainWindow.loadURL(process.env.DEV_URL || `file://${__dirname}/../dist/index.html`);
-}
-
-app.whenReady().then(createWindow);
-```
-
-#### Option B: Tauri Native Packaging (Lightweight Rust Core)
-
-For ultra-low memory overhead and direct SIMD AVX2 acceleration:
-
-```bash
-# 1. Install Tauri CLI
-npm install -D @tauri-apps/cli
-
-# 2. Initialize Tauri configuration
-npx tauri init
-
-# 3. Build native binaries (.msi for Windows, .dmg for macOS, .deb for Linux)
-npx tauri build
-```
+1. English (`en`)
+2. Spanish (`es`)
+3. French (`fr`)
+4. German (`de`)
+5. Italian (`it`)
+6. Portuguese (`pt`)
+7. Russian (`ru`)
+8. Japanese (`ja`)
+9. Korean (`ko`)
+10. Chinese Simplified (`zh`)
+11. Arabic (`ar`)
+12. Hindi (`hi`)
+13. Turkish (`tr`)
+14. Dutch (`nl`)
+15. Polish (`pl`)
+16. Swedish (`sv`)
+17. Indonesian (`id`)
+18. Vietnamese (`vi`)
+19. Thai (`th`)
+20. Greek (`el`)
+21. Czech (`cs`)
+22. Hebrew (`he`)
 
 ---
 
-### 3. Mobile Native Packaging (Android & iOS)
+## 🧪 Verification & Interactive Testing Protocol
 
-Using **Capacitor** to bridge the React application to Android Studio and Apple Xcode:
+1. **Test Fast Export (<kbd>Ctrl+E</kbd>)**:
+   - Press <kbd>Ctrl+E</kbd> or click **Fast Export** in the top toolbar.
+   - Observe the header percentage pill animate, the bottom progress bar fill, and the auditory success chime play.
+   - Verify the **Post-Export Report Modal** opens displaying bitrate, render time, and file size savings.
 
-```bash
-# 1. Install Capacitor core and CLI
-npm install @capacitor/core
-npm install -D @capacitor/cli @capacitor/android @capacitor/ios
+2. **Test Voice Command Recognition**:
+   - Click the microphone icon on the **Voice Commands** pill in the toolbar.
+   - Speak *"start recording"*, *"toggle camera"*, or *"fast export"*.
+   - Confirm the on-screen hotkey HUD toast confirms the action.
 
-# 2. Initialize Capacitor project
-npx cap init "KBT Studio" "com.kbt.appguidevideo" --web-dir dist
+3. **Test Multi-Cam Director**:
+   - Click **Multi-Cam** in the toolbar.
+   - Switch secondary input device and adjust picture-in-picture position to **Bottom-Right** and shape to **Circle**.
+   - Verify the camera bubble repositions cleanly.
 
-# 3. Build React assets
-npm run build
+4. **Test Global Export Templates**:
+   - Click **Templates** in the toolbar.
+   - Select **Mobile Social** (9:16 vertical 1080x1920) or **Presentation Ready**.
+   - Confirm the aspect ratio, format, and resolution update instantly.
 
-# 4. Add platform projects
-npx cap add android
-npx cap add ios
+5. **Test BenchmarkLab Recharts Dashboard & Debugger**:
+   - Navigate to the **BenchmarkLab** tab.
+   - Switch to the **Export Analytics & Recharts** sub-tab to inspect render time bars, format distribution pie, and live performance stream.
+   - Click **Hotkey Event Bus Debugger** to inspect listeners and trigger manual test events.
 
-# 5. Sync web build into native wrappers
-npx cap sync
-```
+6. **Test GitHub Version Control Sync**:
+   - Open **Settings** &rarr; **Version Control** tab.
+   - Enter a GitHub Personal Access Token with `repo` scope, select a repository, and browse the file tree.
+   - Click **Push Metadata to GitHub** and observe the header sync badge update to **'Synced'**.
 
-#### Android Configuration (`AndroidManifest.xml`)
-To enable full-screen recording and microphone telemetry on Android:
-```xml
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
-
-    <application
-        android:label="KBT Studio"
-        android:theme="@style/AppTheme"
-        android:hardwareAccelerated="true">
-        <service
-            android:name="com.kbt.appguidevideo.MediaProjectionService"
-            android:foregroundServiceType="mediaProjection"
-            android:exported="false" />
-    </application>
-</manifest>
-```
-
-Build the release APK/AAB:
-```bash
-npx cap open android
-# In Android Studio: Build -> Generate Signed Bundle / APK
-```
-
-#### iOS Configuration (`Info.plist`)
-For camera, microphone, and ReplayKit screen capture:
-```xml
-<key>NSCameraUsageDescription</key>
-<string>KBT Studio requires camera access for the circular webcam bubble overlay.</string>
-<key>NSMicrophoneUsageDescription</key>
-<string>KBT Studio requires microphone access to record voiceover commentary.</string>
-```
-
-Build the iOS project:
-```bash
-npx cap open ios
-# In Xcode: Product -> Archive
-```
-
----
-
-## 🏛️ The 5 Architectural Pillars & 22 Languages
-
-```
-[ FRONTEND CAPTURE & TELEMETRY ]
-  ├── Desktop (C++, Rust) ───► Zero-Copy GPU Textures ──┐
-  ├── Mobile (Flutter/Kotlin) ► Foreground Daemon ──────┤► [ RAW MULTIMEDIA STREAMS ]
-  └── Web (TypeScript Extension) ► DOM Event Telemetry ┘             │
-                                                                     ▼
-[ DISTRIBUTED STORAGE & PROCESSING ]                         [ FFmpeg ENGINE CORE ]
-  ├── PHP / Ruby (API Catalog & IAM Controls)                ├── libavcodec (NVENC / AMF)
-  └── Python / C# (Microservice Headless Render Farm) ───────┤── Audio Muxer (PCM to AAC)
-                                                              └── OUTPUT: Production MP4
-                                                                      │
-                                                                      ▼
-[ ANALYTICS & SYSTEM MANAGEMENT ]                            [ LMS PLATFORMS / YOUTUBE ]
-  ├── Scala / Java (High-Throughput Telemetry Ingestion)
-  ├── SQL (Time-Series Interaction Mapping Database)
-  └── R / MATLAB (Retention Modeling & Audio Signal Processing)
-```
-
-| Pillar | Languages | Focus Area |
-|---|---|---|
-| **1. Desktop & Low-Level** | C, C++, Rust, Go, Assembly (AVX2/NEON), PowerShell | Zero-copy VRAM capture, SIMD BGRA-to-NV12 color conversion, lock-free ring buffer, FFmpeg hardware muxing, OS audio driver automation |
-| **2. Multi-Platform Mobile** | Kotlin, Java, Dart/Flutter, Swift | Android MediaProjection foreground service, OOM resiliency, JNI binary PCM buffer, iOS ReplayKit bridge |
-| **3. Distributed Cloud & Web** | TypeScript, JavaScript, Python, C# | DOM event telemetry hooks, Playwright headless browser cluster, FastAPI + MoviePy AI narration render farm |
-| **4. Enterprise Analytics** | SQL, R, Scala, Java | Akka/Pekko streaming telemetry ingestion, TimescaleDB interaction mapping, R student retention drop-off models |
-| **5. Legacy & DSP Engines** | PHP, Ruby, MATLAB, COBOL | S3 multi-part chunked media catalog, MATLAB FFT audio hiss filter & silence trimmer, COBOL-85 bandwidth billing manifest |
-
----
-
-## 🚀 Quick Start
-
-```bash
-# Install dependencies
-npm install
-
-# Start local development server
-npm run dev
-
-# Compile production bundle
-npm run build
-```
-
-Open `http://localhost:3000` in your web browser.
-
----
-
-## 📄 Documentation Links
-
-- [Complete User Guide (USER_GUIDE.md)](./USER_GUIDE.md)
-- [Native Installation & Build Manual (INSTALLATION.md)](./INSTALLATION.md)
+7. **Test Static Screenshot Thumbnails**:
+   - Complete a recording session.
+   - Open the **Archive** sidebar and verify the session card displays a static thumbnail screenshot image captured from the recording canvas.

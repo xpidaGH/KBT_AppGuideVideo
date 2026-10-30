@@ -128,7 +128,9 @@ export type ColorFilterId =
   | 'warm-sunlight'
   | 'cyberpunk-cool'
   | 'cinematic-bleach'
-  | 'invert';
+  | 'invert'
+  | 'vhs-glitch'
+  | 'crt-scanlines';
 
 export interface ColorFilterPreset {
   id: ColorFilterId;
@@ -155,6 +157,29 @@ export interface AspectRatioPreset {
   description: string;
 }
 
+export type CropPresetId = 'free' | '16:9' | '9:16' | '1:1' | '4:3' | '21:9' | '3:2';
+
+export interface CropPresetDef {
+  id: CropPresetId;
+  label: string;
+  ratio: number | null; // width / height, or null for free
+  description: string;
+  iconName?: string;
+}
+
+export interface CropSettings {
+  isEnabled: boolean;
+  isEditing: boolean;
+  // Normalized 0..1 bounding box inside capture frame:
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  preset: CropPresetId;
+  isLocked: boolean;
+  showRuleOfThirds: boolean;
+}
+
 export interface ProjectRecordingMetadata {
   projectTitle: string;
   projectDescription: string;
@@ -172,6 +197,15 @@ export interface ProjectRecordingMetadata {
   framerate: number;
   quality: string;
   colorFilter: ColorFilterId;
+  cropSettings?: {
+    isEnabled: boolean;
+    preset: CropPresetId;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    isLocked: boolean;
+  };
   interactiveWorkflowStepsCount: number;
   subtitleCuesCount: number;
   stepsSummary?: Array<{
@@ -210,6 +244,16 @@ export interface SavedProjectSettings {
   saveMetadataAlongside: boolean;
   autoExportOnStop?: boolean;
   selectedFilter?: ColorFilterId;
+  cropSettings?: {
+    isEnabled: boolean;
+    preset: CropPresetId;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    isLocked: boolean;
+    showRuleOfThirds?: boolean;
+  };
   lastSavedAt?: string;
 }
 

@@ -1,0 +1,76 @@
+{
+  "entities": {
+    "Project": {
+      "title": "Project",
+      "description": "User recording project metadata and active state",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "projectTitle": { "type": "string", "maxLength": 200 },
+        "projectDescription": { "type": "string", "maxLength": 1000 },
+        "durationSeconds": { "type": "number" },
+        "formattedDuration": { "type": "string", "maxLength": 30 },
+        "language": { "type": "string", "maxLength": 20 },
+        "exportFormat": { "type": "string", "maxLength": 20 },
+        "aspectRatio": { "type": "string", "maxLength": 20 },
+        "colorFilter": { "type": "string", "maxLength": 50 },
+        "interactiveWorkflowStepsCount": { "type": "number" },
+        "subtitleCuesCount": { "type": "number" },
+        "isAutoSaved": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["projectTitle", "userId", "exportFormat"]
+    },
+    "SavedBlueprint": {
+      "title": "SavedBlueprint",
+      "description": "Custom or bookmarked architectural blueprints",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "language": { "type": "string", "maxLength": 50 },
+        "pillarId": { "type": "string", "maxLength": 50 },
+        "code": { "type": "string", "maxLength": 50000 },
+        "filename": { "type": "string", "maxLength": 100 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "title", "code"]
+    },
+    "RecordingSession": {
+      "title": "RecordingSession",
+      "description": "Historical recording session and export archive",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userId": { "type": "string", "maxLength": 128 },
+        "projectTitle": { "type": "string", "maxLength": 200 },
+        "durationSeconds": { "type": "number" },
+        "formattedDuration": { "type": "string", "maxLength": 30 },
+        "exportFormat": { "type": "string", "maxLength": 20 },
+        "colorFilter": { "type": "string", "maxLength": 50 },
+        "resolution": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "projectTitle", "exportFormat"]
+    }
+  },
+  "firestore": {
+    "/projects/{projectId}": {
+      "schema": "#/entities/Project",
+      "description": "User project state and metadata"
+    },
+    "/savedBlueprints/{blueprintId}": {
+      "schema": "#/entities/SavedBlueprint",
+      "description": "User saved blueprint codes"
+    },
+    "/recordings/{recordingId}": {
+      "schema": "#/entities/RecordingSession",
+      "description": "User recording archives and session history"
+    }
+  }
+}

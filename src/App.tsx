@@ -6,9 +6,12 @@ import { BenchmarkLab } from './components/BenchmarkLab';
 import { UserGuideModal } from './components/UserGuideModal';
 import { InstallationModal } from './components/InstallationModal';
 import { ArchitectureMapModal } from './components/ArchitectureMapModal';
+import { GlobalSearchModal } from './components/GlobalSearchModal';
+import { SettingsModal } from './components/SettingsModal';
 import { SupportedLanguageCode } from './types';
 import { LANGUAGE_MAP, SUPPORTED_LANGUAGES } from './data/languages';
-import { KEYBOARD_SHORTCUTS } from './data/recorderConfig';
+import { KEYBOARD_SHORTCUTS, KeyboardShortcutDef } from './data/recorderConfig';
+import { audioNotification } from './utils/audioNotification';
 import {
   Video,
   BookOpen,
@@ -20,6 +23,10 @@ import {
   Layers,
   ArrowRight,
   Keyboard,
+  CheckCircle2,
+  XCircle,
+  Activity,
+  Sliders,
 } from 'lucide-react';
 
 export default function App() {
@@ -30,18 +37,64 @@ export default function App() {
   const [isUserGuideOpen, setIsUserGuideOpen] = useState<boolean>(false);
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState<boolean>(false);
   const [isArchitectureMapOpen, setIsArchitectureMapOpen] = useState<boolean>(false);
+  const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
   // Recording State
   const [isRecording, setIsRecording] = useState<boolean>(false);
   const [recordingSeconds, setRecordingSeconds] = useState<number>(0);
   const [audioLevel, setAudioLevel] = useState<number>(0);
 
-  // Global Keyboard Listener in App component:
-  // Handles hotkeys for starting/stopping recording (Space key),
-  // toggling recording timer overlay ('T' key), camera bubble ('C' key), mic ('M' key), etc.
+  // Keyboard Shortcuts Configuration
+  const [shortcuts, setShortcuts] = useState<KeyboardShortcutDef[]>(() => {
+    try {
+      const stored = localStorage.getItem('kbt_custom_shortcuts_v1');
+      if (stored) return JSON.parse(stored);
+    } catch (e) {}
+    return KEYBOARD_SHORTCUTS;
+  });
+
+  // Cloud Sync State
+  const [cloudSyncEnabled, setCloudSyncEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('kbt_cloud_sync_enabled_v1') !== 'false';
+    } catch (e) {
+      return true;
+    }
+  });
+
+  // Hotkey Trigger Visual HUD Toast (2-second temporary on-screen toast)
+  const [hotkeyToast, setHotkeyToast] = useState<{ action: string; label: string; key: string } | null>(null);
+
+  // Export Completion Toast
+  const [exportToast, setExportToast] = useState<{
+    fileName: string;
+    format: string;
+    sizeMb: string;
+    success: boolean;
+  } | null>(null);
+
+  // Initialize theme class
+  useEffect(() => {
+    const stored = localStorage.getItem('kbt_theme_v1');
+    if (stored === 'light') {
+      document.documentElement.classList.remove('dark');
+    } else {
+      document.documentElement.classList.add('dark');
+    }
+  }, []);
+
+  // Global Keyboard Listener in App component
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Prevent hijacking text input when user is typing in forms, textareas, or contenteditables
+      // Check for Ctrl+K / Cmd+K to open Global Search
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsSearchOpen((prev) => !prev);
+        return;
+      }
+
+      // Prevent hijacking text inputs
       const target = e.target as HTMLElement | null;
       if (
         target &&
@@ -54,54 +107,95 @@ export default function App() {
         return;
       }
 
-      if (e.code === 'Space' || e.key === ' ') {
-        e.preventDefault(); // Prevent standard page scroll
+      const match = shortcuts.find((s) => {
+        const keyMatches =
+          s.key.toLowerCase() === e.key.toLowerCase() ||
+          s.code.toLowerCase() === e.code.toLowerCase() ||
+          (s.key === ' ' && (e.code === 'Space' || e.key === ' '));
+        const ctrlMatches = s.requiresCtrl ? e.ctrlKey || e.metaKey : !e.ctrlKey && !e.metaKey;
+        const shiftMatches = s.requiresShift ? e.shiftKey : !e.shiftKey;
+        return keyMatches && ctrlMatches && shiftMatches;
+      });
+
+      if (match) {
+        if (match.code === 'Space' || match.key === ' ' || match.requiresCtrl) {
+          e.preventDefault();
+        }
         window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_RECORDING' } })
-        );
-      } else if (e.key === 't' || e.key === 'T') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_TIMER' } })
-        );
-      } else if (e.key === 'c' || e.key === 'C') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_CAM' } })
-        );
-      } else if (e.key === 'm' || e.key === 'M') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_MIC' } })
-        );
-      } else if (e.key === 'p' || e.key === 'P') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'PREVIEW_TTS' } })
-        );
-      } else if (e.key === 'f' || e.key === 'F') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'CYCLE_FILTER' } })
-        );
-      } else if (e.key === 'd' || e.key === 'D') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_DRAW' } })
-        );
-      } else if (e.key === 'g' || e.key === 'G') {
-        window.dispatchEvent(
-          new CustomEvent('kbt-hotkey', { detail: { action: 'TOGGLE_TELEMETRY' } })
+          new CustomEvent('kbt-hotkey', { detail: { action: match.action, source: 'keyboard' } })
         );
       }
     };
-
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
+  }, [shortcuts]);
+
+  // Listen for 'kbt-hotkey' event for 2-second temporary HUD toast notification
+  useEffect(() => {
+    let timer: number;
+    const handleHotkeyEvent = (e: any) => {
+      const action = e.detail?.action;
+      if (action) {
+        const match = shortcuts.find((s) => s.action === action);
+        setHotkeyToast({
+          action,
+          label: match ? match.description : action,
+          key: match ? match.displayKey : '',
+        });
+
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          setHotkeyToast(null);
+        }, 2000);
+      }
+    };
+
+    window.addEventListener('kbt-hotkey', handleHotkeyEvent);
+    return () => {
+      window.removeEventListener('kbt-hotkey', handleHotkeyEvent);
+      window.clearTimeout(timer);
+    };
+  }, [shortcuts]);
+
+  // Listen for 'kbt-export-complete' event
+  useEffect(() => {
+    let timer: number;
+    const handleExportComplete = (e: any) => {
+      const detail = e.detail || {};
+      audioNotification.playExportSuccessSound();
+      setExportToast({
+        fileName: detail.fileName || 'tutorial_recording.mp4',
+        format: (detail.format || 'mp4').toUpperCase(),
+        sizeMb: detail.sizeMb || '12.4',
+        success: detail.success !== false,
+      });
+
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        setExportToast(null);
+      }, 4500);
+    };
+
+    window.addEventListener('kbt-export-complete', handleExportComplete);
+    return () => {
+      window.removeEventListener('kbt-export-complete', handleExportComplete);
+      window.clearTimeout(timer);
+    };
   }, []);
+
+  const handleResetShortcuts = () => {
+    localStorage.removeItem('kbt_custom_shortcuts_v1');
+    setShortcuts(KEYBOARD_SHORTCUTS);
+  };
 
   const currentLang = LANGUAGE_MAP[selectedLanguage] || SUPPORTED_LANGUAGES[0];
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans selection:bg-indigo-500 selection:text-white">
-      {/* Top Application Header */}
+      {/* Top Application Header with GitHub sync, Global Search, and visible focus rings */}
       <Header
         currentTab={currentTab}
         setCurrentTab={setCurrentTab}
@@ -110,6 +204,8 @@ export default function App() {
         onOpenUserGuide={() => setIsUserGuideOpen(true)}
         onOpenInstallGuide={() => setIsInstallGuideOpen(true)}
         onOpenArchitectureMap={() => setIsArchitectureMapOpen(true)}
+        onOpenSearch={() => setIsSearchOpen(true)}
+        onOpenSettings={() => setIsSettingsOpen(true)}
         isRecording={isRecording}
         recordingSeconds={recordingSeconds}
         audioLevel={audioLevel}
@@ -117,7 +213,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 p-3 sm:p-6 space-y-6">
-        {/* Splash Banner (Prominently featuring User Guide, Native Install, and 22 Languages) */}
+        {/* Splash Banner */}
         <div className="max-w-7xl mx-auto rounded-3xl bg-gradient-to-r from-indigo-950/60 via-purple-950/30 to-zinc-900 border border-indigo-900/40 p-6 sm:p-8 shadow-2xl relative overflow-hidden">
           <div className="absolute -right-20 -bottom-20 w-80 h-80 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
 
@@ -129,7 +225,7 @@ export default function App() {
                   KBT_AppGuideVideo Systems Capstone
                 </span>
                 <span className="text-xs text-zinc-400 font-mono">
-                  Inspired by OBS Studio, Camtasia, Scribe & Loom
+                  OBS, Camtasia, Scribe & Loom Engineering Studio
                 </span>
               </div>
 
@@ -141,30 +237,36 @@ export default function App() {
                 Empowering international computer science and systems programming students to capture raw GPU textures, vectorize color spaces in SIMD assembly, mux hardware containers, stream reactive telemetry lakes, and synthesize multi-lingual voiceovers across mobile, web, and desktop.
               </p>
 
-              {/* Splash Screen Action Buttons: User Guide Button, Native Install, Language Switcher */}
+              {/* Splash Screen Action Buttons */}
               <div className="flex flex-wrap items-center gap-3 pt-2">
-                {/* 1. Prompt-Required User Guide Button */}
                 <button
                   id="btn-splash-user-guide"
                   onClick={() => setIsUserGuideOpen(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition active:scale-95"
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/30 transition active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <BookOpen className="w-4 h-4" />
                   <span>Open 22-Language User Guide (USER_GUIDE.md)</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </button>
 
-                {/* 2. Prompt-Required Native Install Guide Button */}
                 <button
                   id="btn-splash-install-guide"
                   onClick={() => setIsInstallGuideOpen(true)}
-                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-emerald-300 border border-emerald-500/40 font-bold text-xs shadow-sm transition active:scale-95"
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-emerald-300 border border-emerald-500/40 font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                 >
                   <Download className="w-4 h-4 text-emerald-400" />
                   <span>Native Install Guide (Android, iOS, Windows, macOS)</span>
                 </button>
 
-                {/* 3. Language Selector */}
+                <button
+                  onClick={() => setIsSettingsOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-semibold transition cursor-pointer"
+                >
+                  <Sliders className="w-4 h-4 text-purple-400" />
+                  <span>Studio Settings</span>
+                </button>
+
+                {/* Language Selector */}
                 <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-zinc-900/90 border border-zinc-800 text-xs">
                   <Languages className="w-4 h-4 text-purple-400" />
                   <span className="text-zinc-400">Language:</span>
@@ -197,13 +299,13 @@ export default function App() {
                 <span className="text-[10px] text-zinc-400">Full I18n & TTS</span>
               </div>
               <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80">
-                <span className="text-zinc-500 text-[10px]">ANNOTATIONS</span>
-                <div className="text-lg font-bold text-amber-400">Softsubs & Scribe</div>
-                <span className="text-[10px] text-zinc-400">VTT/SRT + Workflows</span>
+                <span className="text-zinc-500 text-[10px]">SHORTCUT</span>
+                <div className="text-lg font-bold text-emerald-400">Ctrl+E Fast</div>
+                <span className="text-[10px] text-zinc-400">Zero-Wait Export</span>
               </div>
               <div className="p-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80">
                 <span className="text-zinc-500 text-[10px]">OUTPUT FORMAT</span>
-                <div className="text-lg font-bold text-emerald-400">1080p 60FPS</div>
+                <div className="text-lg font-bold text-amber-400">1080p 60FPS</div>
                 <span className="text-[10px] text-zinc-400">YouTube & LMS Ready</span>
               </div>
             </div>
@@ -232,7 +334,6 @@ export default function App() {
 
       {/* Footer & Global Keyboard Shortcuts Legend */}
       <footer className="mt-auto border-t border-zinc-900 bg-zinc-950 text-xs text-zinc-500">
-        {/* Visual Keyboard Shortcuts Legend Bar */}
         <div
           id="footer-keyboard-shortcuts-legend"
           className="px-4 sm:px-6 py-2.5 bg-zinc-900/40 border-b border-zinc-900 flex flex-wrap items-center justify-between gap-3 text-xs"
@@ -248,18 +349,18 @@ export default function App() {
           </div>
 
           <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-            {KEYBOARD_SHORTCUTS.map((sc) => (
+            {shortcuts.map((sc) => (
               <button
-                key={sc.action}
+                key={sc.action + sc.displayKey}
                 type="button"
-                id={`footer-shortcut-${sc.displayKey.toLowerCase()}`}
+                id={`footer-shortcut-${sc.displayKey.toLowerCase().replace(/[^a-z0-9]/g, '-')}`}
                 onClick={() =>
                   window.dispatchEvent(
                     new CustomEvent('kbt-hotkey', { detail: { action: sc.action } })
                   )
                 }
                 title={`Hotkey [${sc.displayKey}]: ${sc.description}`}
-                className="shortcut-legend-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-850 hover:border-indigo-500/50 border border-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 shadow-xs cursor-pointer"
+                className="shortcut-legend-pill inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-zinc-900/90 hover:bg-zinc-850 hover:border-indigo-500/50 border border-zinc-800 text-zinc-300 hover:text-white transition active:scale-95 shadow-xs cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
               >
                 <kbd className="px-1.5 py-0.5 rounded bg-zinc-950 border border-zinc-700 text-amber-300 font-mono font-bold text-[10px] shadow-xs">
                   {sc.displayKey}
@@ -293,6 +394,49 @@ export default function App() {
         </div>
       </footer>
 
+      {/* Temporary Visual Indicator Toast: 2 seconds on kbt-hotkey event */}
+      {hotkeyToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-16 right-6 z-50 flex items-center gap-2.5 px-4 py-2.5 rounded-2xl bg-zinc-900/95 border border-indigo-500/70 shadow-2xl backdrop-blur-md animate-in slide-in-from-bottom-3 duration-200"
+        >
+          <div className="p-1 rounded-lg bg-indigo-500/20 text-indigo-400 border border-indigo-500/40">
+            <Keyboard className="w-4 h-4" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>{hotkeyToast.label}</span>
+              {hotkeyToast.key && (
+                <kbd className="px-1.5 py-0.2 rounded bg-zinc-950 border border-zinc-700 text-amber-300 font-mono text-[10px]">
+                  {hotkeyToast.key}
+                </kbd>
+              )}
+            </div>
+            <div className="text-[10px] text-zinc-400 font-mono">{hotkeyToast.action} triggered</div>
+          </div>
+        </div>
+      )}
+
+      {/* Global Export Completion Toast */}
+      {exportToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed top-16 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl bg-zinc-900/95 border border-emerald-500/70 shadow-2xl backdrop-blur-md animate-in slide-in-from-top-3 duration-300"
+        >
+          <div className="p-1.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+          <div>
+            <div className="text-xs font-bold text-white">Export Successfully Completed!</div>
+            <div className="text-[11px] text-zinc-300 font-mono">
+              {exportToast.fileName} ({exportToast.sizeMb} MB • {exportToast.format})
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Modals */}
       <UserGuideModal
         isOpen={isUserGuideOpen}
@@ -309,6 +453,29 @@ export default function App() {
       <ArchitectureMapModal
         isOpen={isArchitectureMapOpen}
         onClose={() => setIsArchitectureMapOpen(false)}
+      />
+
+      <GlobalSearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        onOpenDoc={(docType) => {
+          if (docType === 'user-guide') setIsUserGuideOpen(true);
+          else if (docType === 'installation') setIsInstallGuideOpen(true);
+          else if (docType === 'architecture') setIsArchitectureMapOpen(true);
+        }}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        shortcuts={shortcuts}
+        onUpdateShortcuts={setShortcuts}
+        onResetShortcuts={handleResetShortcuts}
+        cloudSyncEnabled={cloudSyncEnabled}
+        onToggleCloudSync={(enabled) => {
+          setCloudSyncEnabled(enabled);
+          localStorage.setItem('kbt_cloud_sync_enabled_v1', enabled ? 'true' : 'false');
+        }}
       />
     </div>
   );

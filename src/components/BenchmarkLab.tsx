@@ -11,12 +11,17 @@ import {
   FileText,
   Activity,
   Zap,
+  BarChart3,
+  Terminal,
 } from 'lucide-react';
+import { ExportAnalyticsDashboard } from './ExportAnalyticsDashboard';
+import { HotkeyDebugModal } from './HotkeyDebugModal';
 
 export const BenchmarkLab: React.FC = () => {
   const [activeBenchmark, setActiveBenchmark] = useState<
-    'simd' | 'ring_buffer' | 'matlab_dsp' | 'cobol_batch' | 'sql_telemetry'
-  >('simd');
+    'simd' | 'ring_buffer' | 'matlab_dsp' | 'cobol_batch' | 'sql_telemetry' | 'export_analytics'
+  >('export_analytics');
+  const [isHotkeyDebugOpen, setIsHotkeyDebugOpen] = useState<boolean>(false);
 
   // SIMD Benchmark State
   const [simdResult, setSimdResult] = useState<{
@@ -154,6 +159,18 @@ BATCH EXECUTION COMPLETED: RETURN-CODE = 0000`;
 
         {/* Tab Buttons */}
         <div className="flex flex-wrap gap-1.5">
+          <button
+            onClick={() => setActiveBenchmark('export_analytics')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+              activeBenchmark === 'export_analytics'
+                ? 'bg-indigo-600 text-white shadow-md'
+                : 'bg-zinc-950 text-indigo-300 hover:text-white border border-indigo-500/40'
+            }`}
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Export Analytics & Recharts</span>
+          </button>
+
           <button
             onClick={() => setActiveBenchmark('simd')}
             className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
@@ -506,7 +523,18 @@ BATCH EXECUTION COMPLETED: RETURN-CODE = 0000`;
             )}
           </div>
         )}
+
+        {/* 6. Export Statistics & Live Recharts Dashboard */}
+        {activeBenchmark === 'export_analytics' && (
+          <ExportAnalyticsDashboard onOpenHotkeyDebugger={() => setIsHotkeyDebugOpen(true)} />
+        )}
       </div>
+
+      {/* Hotkey Event Bus Debugger Modal */}
+      <HotkeyDebugModal
+        isOpen={isHotkeyDebugOpen}
+        onClose={() => setIsHotkeyDebugOpen(false)}
+      />
     </div>
   );
 };

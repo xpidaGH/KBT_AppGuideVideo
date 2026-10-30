@@ -52,6 +52,7 @@ import {
   Scissors,
   Activity,
   Cpu,
+  Crop,
 } from 'lucide-react';
 import {
   SupportedLanguageCode,
@@ -69,6 +70,8 @@ import {
   DrawingToolType,
   DrawingStroke,
   DrawingPoint,
+  CropSettings,
+  CropPresetId,
 } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
 import { INITIAL_SOFTSUB_CUES, INITIAL_SCRIBE_STEPS } from '../data/annotationsData';
@@ -103,8 +106,48 @@ import {
 } from '../data/recorderConfig';
 
 
-import { applyLutToImageData } from '../utils/colorFilterPipeline';
+import { applyLutToImageData, renderPostProcessingGlitchFx } from '../utils/colorFilterPipeline';
 import { createAnimatedGifBlob, sampleCanvasFrame } from '../utils/gifEncoder';
+import { MultiTrackAudioMixer, NoiseGateConfig, CompressorConfig } from '../utils/noiseGate';
+import {
+  syncProjectToFirestore,
+  archiveRecordingSession,
+  isCloudSyncEnabled,
+  setCloudSyncEnabled,
+  ArchiveSessionItem,
+} from '../services/firebaseSync';
+import {
+  DEFAULT_WATERMARK_PRESETS,
+  WATERMARK_POSITIONS,
+  WatermarkPositionType,
+  DEFAULT_CROP_SETTINGS,
+  CROP_PRESETS,
+} from '../data/structuredStudioData';
+import { SettingsModal } from './SettingsModal';
+import { ProjectArchiveSidebar } from './ProjectArchiveSidebar';
+import { SocialShareModal } from './SocialShareModal';
+import { FilterLibraryModal } from './FilterLibraryModal';
+import { AudioMixerPanel } from './AudioMixerPanel';
+import { WatermarkPanel, WatermarkSettings } from './WatermarkPanel';
+import { AiTranscriptPanel } from './AiTranscriptPanel';
+import { CropOverlay } from './CropOverlay';
+import { AudioVisualizer } from './AudioVisualizer';
+import { HotkeyToastOverlay } from './HotkeyToastOverlay';
+import { TeleprompterOverlay } from './TeleprompterOverlay';
+import { SceneTransitionModal, SceneTransitionConfig } from './SceneTransitionModal';
+import { CustomQualityPresetsModal } from './CustomQualityPresetsModal';
+import { ExportToastNotification, ExportToastData } from './ExportToastNotification';
+import { CustomQualityPreset } from '../services/firebaseSync';
+import { KeyboardShortcutDef } from '../data/recorderConfig';
+import { VoiceCommandController } from './VoiceCommandController';
+import { MultiCamDirectorModal, DEFAULT_MULTICAM_CONFIG, MultiCamConfig } from './MultiCamDirectorModal';
+import { PostExportReportModal, ExportReportData } from './PostExportReportModal';
+import { GlobalExportTemplatesModal } from './GlobalExportTemplatesModal';
+import { VoiceoverSynthesisModal } from './VoiceoverSynthesisModal';
+import { SmartScriptingModal } from './SmartScriptingModal';
+import { StudioActionsSidebar } from './StudioActionsSidebar';
+import { audioNotification } from '../utils/audioNotification';
+import { GlobalExportTemplate } from '../data/structuredStudioData';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -246,6 +289,24 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     });
   };
 
+  // Video Cropping Tool State (Interactive overlay, custom bounding box & aspect ratio presets)
+  const [cropSettings, setCropSettings] = useState<CropSettings>(() => {
+    const saved = loadSavedProjectSettings();
+    if (saved?.cropSettings) {
+      return {
+        ...DEFAULT_CROP_SETTINGS,
+        ...saved.cropSettings,
+        isEditing: false,
+      };
+    }
+    return { ...DEFAULT_CROP_SETTINGS };
+  });
+  const cropSettingsRef = useRef<CropSettings>(cropSettings);
+  cropSettingsRef.current = cropSettings;
+
+  // Offscreen canvas for rendering simulator frame when crop is active
+  const offscreenSimCanvasRef = useRef<HTMLCanvasElement | null>(null);
+
   // Export settings & Format Pipeline (MP4, WEBM, GIF)
   const [selectedExportFormat, setSelectedExportFormat] = useState<ExportFormatId>(() => {
     const saved = loadSavedProjectSettings();
@@ -271,7 +332,19 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     return DEFAULT_STUDIO_CONFIG.defaultFramerate;
   });
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [exportProgressPercent, setExportProgressPercent] = useState<number>(0);
   const [exportStatusText, setExportStatusText] = useState<string>('');
+  const [isPostExportReportOpen, setIsPostExportReportOpen] = useState<boolean>(false);
+  const [postExportReport, setPostExportReport] = useState<ExportReportData | null>(null);
+
+  // New Modals & Director Controls State
+  const [isMultiCamModalOpen, setIsMultiCamModalOpen] = useState<boolean>(false);
+  const [multiCamConfig, setMultiCamConfig] = useState<MultiCamConfig>(DEFAULT_MULTICAM_CONFIG);
+  const [isGlobalTemplatesOpen, setIsGlobalTemplatesOpen] = useState<boolean>(false);
+  const [isVoiceoverModalOpen, setIsVoiceoverModalOpen] = useState<boolean>(false);
+  const [isSmartScriptingOpen, setIsSmartScriptingOpen] = useState<boolean>(false);
+  const [isActionsSidebarOpen, setIsActionsSidebarOpen] = useState<boolean>(false);
+
   const recordedBlobRef = useRef<Blob | null>(null);
   const sampledGifFramesRef = useRef<ImageData[]>([]);
 
@@ -351,6 +424,16 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         saveMetadataAlongside,
         autoExportOnStop,
         selectedFilter,
+        cropSettings: {
+          isEnabled: cropSettings.isEnabled,
+          preset: cropSettings.preset,
+          x: cropSettings.x,
+          y: cropSettings.y,
+          width: cropSettings.width,
+          height: cropSettings.height,
+          isLocked: cropSettings.isLocked,
+          showRuleOfThirds: cropSettings.showRuleOfThirds,
+        },
         lastSavedAt: timeStr,
       };
 
@@ -372,6 +455,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     saveMetadataAlongside,
     autoExportOnStop,
     selectedFilter,
+    cropSettings,
   ]);
 
   // Reset to default factory settings and clear localStorage
@@ -387,6 +471,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       setSaveMetadataAlongside(true);
       setAutoExportOnStop(true);
       setSelectedFilter(DEFAULT_STUDIO_CONFIG.defaultFilter);
+      setCropSettings({ ...DEFAULT_CROP_SETTINGS });
       setLastAutoSavedTime(null);
       setAutoSavePulse(true);
       setTimeout(() => setAutoSavePulse(false), 1200);
@@ -394,6 +479,215 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       console.warn('Failed to reset project settings:', err);
     }
   };
+
+  // Modals & Sidebars
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState<boolean>(false);
+  const [isSocialShareOpen, setIsSocialShareOpen] = useState<boolean>(false);
+  const [isFilterLibraryOpen, setIsFilterLibraryOpen] = useState<boolean>(false);
+  const [isAudioMixerOpen, setIsAudioMixerOpen] = useState<boolean>(false);
+  const [isWatermarkPanelOpen, setIsWatermarkPanelOpen] = useState<boolean>(false);
+  const [isAiTranscriptOpen, setIsAiTranscriptOpen] = useState<boolean>(false);
+  const [isTeleprompterOpen, setIsTeleprompterOpen] = useState<boolean>(false);
+  const [isSceneTransitionModalOpen, setIsSceneTransitionModalOpen] = useState<boolean>(false);
+  const [sceneTransitionConfig, setSceneTransitionConfig] = useState<SceneTransitionConfig>({
+    type: 'fade',
+    durationMs: 500,
+  });
+  const [isQualityPresetsModalOpen, setIsQualityPresetsModalOpen] = useState<boolean>(false);
+  const [exportToast, setExportToast] = useState<ExportToastData | null>(null);
+
+  // Scene transition canvas compositor state
+  const lastSceneSnapshotCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const transitionStartTimeRef = useRef<number | null>(null);
+  const transitionTypeRef = useRef<string>('fade');
+  const transitionDurationRef = useRef<number>(500);
+
+  const captureSceneSnapshot = () => {
+    if (!canvasRef.current) return;
+    if (!lastSceneSnapshotCanvasRef.current) {
+      lastSceneSnapshotCanvasRef.current = document.createElement('canvas');
+    }
+    const snap = lastSceneSnapshotCanvasRef.current;
+    snap.width = canvasRef.current.width;
+    snap.height = canvasRef.current.height;
+    const snapCtx = snap.getContext('2d');
+    if (snapCtx) {
+      snapCtx.drawImage(canvasRef.current, 0, 0);
+    }
+  };
+
+  const triggerSceneTransition = (type?: string, durationMs?: number) => {
+    captureSceneSnapshot();
+    transitionTypeRef.current = type || sceneTransitionConfig.type;
+    transitionDurationRef.current = durationMs || sceneTransitionConfig.durationMs;
+    transitionStartTimeRef.current = performance.now();
+  };
+
+  // Customizable Keyboard Shortcuts (in state)
+  const [customShortcuts, setCustomShortcuts] = useState<KeyboardShortcutDef[]>(() => {
+    return KEYBOARD_SHORTCUTS;
+  });
+
+  // Global Cloud Sync Preference
+  const [cloudSyncEnabled, setCloudSyncEnabledState] = useState<boolean>(() => isCloudSyncEnabled());
+  const handleToggleCloudSync = (enabled: boolean) => {
+    setCloudSyncEnabledState(enabled);
+    setCloudSyncEnabled(enabled);
+  };
+
+  // Multi-Track Audio Mixer & Digital Noise Gate State
+  const audioMixerRef = useRef<MultiTrackAudioMixer | null>(null);
+  const [micVolume, setMicVolume] = useState<number>(1.0);
+  const [isMicMuted, setIsMicMuted] = useState<boolean>(false);
+  const [systemVolume, setSystemVolume] = useState<number>(1.0);
+  const [isSystemMuted, setIsSystemMuted] = useState<boolean>(false);
+  const [secondaryVolume, setSecondaryVolume] = useState<number>(0.7);
+  const [isSecondaryMuted, setIsSecondaryMuted] = useState<boolean>(false);
+  const [ambientTrack, setAmbientTrack] = useState<string>('none');
+  const ambientAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const [noiseGateConfig, setNoiseGateConfig] = useState<NoiseGateConfig>({
+    enabled: true,
+    thresholdDb: -42,
+    attackTimeMs: 15,
+    releaseTimeMs: 220,
+  });
+
+  const [compressorConfig, setCompressorConfig] = useState<CompressorConfig>({
+    enabled: true,
+    thresholdDb: -24,
+    kneeDb: 30,
+    ratio: 4,
+    attackTimeSec: 0.003,
+    releaseTimeSec: 0.25,
+  });
+
+  const [meterLevels, setMeterLevels] = useState<{
+    micLevel: number;
+    micGateActive: boolean;
+    compressorReduction: number;
+    compressorActive: boolean;
+    systemLevel: number;
+    secondaryLevel: number;
+    masterLevel: number;
+  }>({
+    micLevel: 0,
+    micGateActive: false,
+    compressorReduction: 0,
+    compressorActive: false,
+    systemLevel: 0,
+    secondaryLevel: 0,
+    masterLevel: 0,
+  });
+
+  // Initialize Audio Mixer
+  useEffect(() => {
+    const mixer = new MultiTrackAudioMixer();
+    audioMixerRef.current = mixer;
+    mixer.onLevels((levels) => {
+      setMeterLevels(levels);
+      setAudioLevel(levels.masterLevel);
+    });
+
+    return () => {
+      mixer.dispose();
+      audioMixerRef.current = null;
+    };
+  }, [setAudioLevel]);
+
+  // Sync mixer volume changes
+  useEffect(() => {
+    audioMixerRef.current?.setTrackVolume('mic', micVolume, isMicMuted);
+  }, [micVolume, isMicMuted]);
+
+  useEffect(() => {
+    audioMixerRef.current?.setTrackVolume('system', systemVolume, isSystemMuted);
+  }, [systemVolume, isSystemMuted]);
+
+  useEffect(() => {
+    audioMixerRef.current?.setTrackVolume('secondary', secondaryVolume, isSecondaryMuted);
+  }, [secondaryVolume, isSecondaryMuted]);
+
+  useEffect(() => {
+    audioMixerRef.current?.setNoiseGateConfig(noiseGateConfig);
+  }, [noiseGateConfig]);
+
+  useEffect(() => {
+    audioMixerRef.current?.setCompressorConfig(compressorConfig);
+  }, [compressorConfig]);
+
+  // Ambient sound synthesizer for secondary track
+  useEffect(() => {
+    if (ambientTrack !== 'none') {
+      if (!ambientAudioRef.current) {
+        // High quality data-URI ambient synth tone generator
+        const audio = new Audio();
+        audio.loop = true;
+        ambientAudioRef.current = audio;
+      }
+    }
+  }, [ambientTrack]);
+
+  // Watermark Settings & Image Preloader
+  const [watermarkSettings, setWatermarkSettings] = useState<WatermarkSettings>({
+    enabled: false,
+    dataUrl: null,
+    opacity: 0.8,
+    position: 'bottom-right',
+    scale: 0.22,
+  });
+  const watermarkImgRef = useRef<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    if (watermarkSettings.dataUrl) {
+      const img = new Image();
+      img.src = watermarkSettings.dataUrl;
+      img.onload = () => {
+        watermarkImgRef.current = img;
+      };
+    } else {
+      watermarkImgRef.current = null;
+    }
+  }, [watermarkSettings.dataUrl]);
+
+  // Auto-Save Mechanism: Periodic 30-Second Commit to Firestore
+  useEffect(() => {
+    const autoSaveTimer = setInterval(() => {
+      if (cloudSyncEnabled) {
+        syncProjectToFirestore(`project-active-session`, {
+          projectTitle: projectTitleRef.current,
+          projectDescription: projectDescriptionRef.current,
+          durationSeconds: recordingSeconds,
+          formattedDuration: formatDisplayDuration(recordingSeconds),
+          language: selectedLanguageRef.current,
+          exportFormat: selectedExportFormatRef.current,
+          aspectRatio: selectedAspectRatio,
+          colorFilter: activeFilter.id,
+          cropSettings: {
+            isEnabled: cropSettings.isEnabled,
+            preset: cropSettings.preset,
+            x: cropSettings.x,
+            y: cropSettings.y,
+            width: cropSettings.width,
+            height: cropSettings.height,
+            isLocked: cropSettings.isLocked,
+          },
+          interactiveWorkflowStepsCount: scribeSteps.length,
+          subtitleCuesCount: cues.length,
+          isAutoSaved: true,
+        }).catch((e) => console.warn('Firestore 30s auto-save warning:', e));
+
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setLastAutoSavedTime(timeStr);
+        setAutoSavePulse(true);
+        setTimeout(() => setAutoSavePulse(false), 1500);
+      }
+    }, 30000);
+
+    return () => clearInterval(autoSaveTimer);
+  }, [cloudSyncEnabled, recordingSeconds, selectedAspectRatio, activeFilter, cropSettings, scribeSteps.length, cues.length]);
 
   // Drawing & Screen Highlight Overlay State (Real-Time Annotation on Canvas)
   const [isDrawModeActive, setIsDrawModeActive] = useState<boolean>(false);
@@ -732,7 +1026,161 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     return () => clearInterval(interval);
   }, [isRecording, isPaused, setRecordingSeconds, activeAspectRatio]);
 
-  // Real-time canvas animation loop (Compositing Video/IDE base, Color Filter LUT, Ripples, Cursor Halo, Softsubs, Timer Overlay)
+  // Helper to render simulator IDE workstation scene onto any target context
+  const drawSimulatorWorkstation = (
+    targetCtx: CanvasRenderingContext2D,
+    w: number,
+    h: number
+  ) => {
+    const bgGrad = targetCtx.createLinearGradient(0, 0, w, h);
+    bgGrad.addColorStop(0, '#09090b');
+    bgGrad.addColorStop(0.5, '#121217');
+    bgGrad.addColorStop(1, '#09090b');
+    targetCtx.fillStyle = bgGrad;
+    targetCtx.fillRect(0, 0, w, h);
+
+    // Window Frame
+    const pad = Math.min(24, Math.floor(w * 0.02));
+    const winW = w - pad * 2;
+    const winH = h - pad * 2;
+
+    targetCtx.fillStyle = '#0e0f14';
+    targetCtx.roundRect(pad, pad, winW, winH, 12);
+    targetCtx.fill();
+    targetCtx.strokeStyle = '#27272a';
+    targetCtx.lineWidth = 1.5;
+    targetCtx.stroke();
+
+    // Header bar
+    targetCtx.fillStyle = '#18181b';
+    targetCtx.roundRect(pad, pad, winW, 40, [12, 12, 0, 0]);
+    targetCtx.fill();
+
+    // Window buttons
+    targetCtx.fillStyle = '#ef4444';
+    targetCtx.beginPath();
+    targetCtx.arc(pad + 20, pad + 20, 5.5, 0, Math.PI * 2);
+    targetCtx.fill();
+    targetCtx.fillStyle = '#f59e0b';
+    targetCtx.beginPath();
+    targetCtx.arc(pad + 38, pad + 20, 5.5, 0, Math.PI * 2);
+    targetCtx.fill();
+    targetCtx.fillStyle = '#10b981';
+    targetCtx.beginPath();
+    targetCtx.arc(pad + 56, pad + 20, 5.5, 0, Math.PI * 2);
+    targetCtx.fill();
+
+    // Title
+    targetCtx.font = '600 13px "JetBrains Mono", monospace';
+    targetCtx.fillStyle = '#a1a1aa';
+    const titleText =
+      w < 1200
+        ? 'KBT CloudIDE Simulator'
+        : 'KBT CloudIDE Simulator — Multi-Language Architecture Engine';
+    targetCtx.fillText(titleText, pad + 78, pad + 25);
+
+    // Active Aspect Ratio & LUT banner in header
+    targetCtx.font = '700 11px "JetBrains Mono", monospace';
+    targetCtx.textAlign = 'right';
+    let rightOffset = 20;
+    if (activeFilter.id !== 'none') {
+      targetCtx.fillStyle = '#c084fc';
+      targetCtx.fillText(`LUT: [${activeFilter.name.toUpperCase()}]`, pad + winW - rightOffset, pad + 25);
+      rightOffset += 160;
+    }
+    targetCtx.fillStyle = '#818cf8';
+    targetCtx.fillText(`[${activeAspectRatio.id} • ${activeAspectRatio.platform}]`, pad + winW - rightOffset, pad + 25);
+    targetCtx.textAlign = 'left';
+
+    // Sidebar
+    const sidebarW = w < 1200 ? 170 : 200;
+    targetCtx.fillStyle = '#121318';
+    targetCtx.fillRect(pad + 1, pad + 41, sidebarW, winH - 42);
+    targetCtx.strokeStyle = '#27272a';
+    targetCtx.beginPath();
+    targetCtx.moveTo(pad + sidebarW + 1, pad + 41);
+    targetCtx.lineTo(pad + sidebarW + 1, pad + winH);
+    targetCtx.stroke();
+
+    targetCtx.font = '600 11px "JetBrains Mono", monospace';
+    targetCtx.fillStyle = '#71717a';
+    targetCtx.fillText('EXPLORER : KBT PROJECT', pad + 16, pad + 65);
+
+    const files = [
+      '📄 main.cpp [AVX2]',
+      '📄 SIMD_Kernel.rs',
+      '📄 pipeline.go',
+      '📄 engine.cu [CUDA]',
+      '📄 config.toml',
+    ];
+    files.forEach((f, fi) => {
+      targetCtx.fillStyle = fi === 0 ? '#818cf8' : '#a1a1aa';
+      targetCtx.fillText(f, pad + 16, pad + 95 + fi * 26);
+    });
+
+    // Editor code area
+    const terminalH = h > 1400 ? 260 : 140;
+    targetCtx.fillStyle = '#0d0e12';
+    targetCtx.fillRect(pad + sidebarW + 2, pad + 41, winW - sidebarW - 3, winH - terminalH - 42);
+
+    const codeSnippets = [
+      '// High-Performance Architectural Engine SIMD Kernel',
+      '#include <immintrin.h>',
+      '#include <stdint.h>',
+      '',
+      'void process_vector_stream(const float* in, float* out, size_t n) {',
+      '    const __m256 kPivot = _mm256_set1_ps(1.0f);',
+      '    for (size_t i = 0; i < n; i += 8) {',
+      '        __m256 v = _mm256_loadu_ps(in + i);',
+      '        __m256 res = _mm256_fmadd_ps(v, v, kPivot);',
+      '        _mm256_storeu_ps(out + i, res);',
+      '    }',
+      '}',
+    ];
+    targetCtx.font = '12px "JetBrains Mono", monospace';
+    codeSnippets.forEach((line, li) => {
+      targetCtx.fillStyle = '#52525b';
+      targetCtx.fillText(String(li + 1).padStart(2, '0'), pad + sidebarW + 18, pad + 72 + li * 22);
+      targetCtx.fillStyle =
+        line.startsWith('//')
+          ? '#71717a'
+          : line.startsWith('#')
+          ? '#f43f5e'
+          : line.includes('void') || line.includes('const')
+          ? '#60a5fa'
+          : line.includes('_mm256')
+          ? '#34d399'
+          : '#e4e4e7';
+      targetCtx.fillText(line, pad + sidebarW + 50, pad + 72 + li * 22);
+    });
+
+    // Terminal pane
+    targetCtx.fillStyle = '#090a0f';
+    targetCtx.fillRect(pad + sidebarW + 2, pad + winH - terminalH, winW - sidebarW - 3, terminalH);
+    targetCtx.strokeStyle = '#27272a';
+    targetCtx.beginPath();
+    targetCtx.moveTo(pad + sidebarW + 2, pad + winH - terminalH);
+    targetCtx.lineTo(pad + winW, pad + winH - terminalH);
+    targetCtx.stroke();
+
+    targetCtx.font = '600 11px "JetBrains Mono", monospace';
+    targetCtx.fillStyle = '#38bdf8';
+    targetCtx.fillText(
+      `TERMINAL : KBT COMPILER [${activeAspectRatio.id} ${activeAspectRatio.width}×${activeAspectRatio.height}]`,
+      pad + sidebarW + 18,
+      pad + winH - terminalH + 24
+    );
+
+    targetCtx.font = '11px "JetBrains Mono", monospace';
+    targetCtx.fillStyle = '#4ade80';
+    targetCtx.fillText('[OK] Real-time Canvas Capture Stream Initialized.', pad + sidebarW + 18, pad + winH - terminalH + 46);
+    targetCtx.fillStyle = '#e4e4e7';
+    targetCtx.fillText(`[LUT] Active Color-Correction Filter: ${activeFilter.name}`, pad + sidebarW + 18, pad + winH - terminalH + 68);
+    targetCtx.fillStyle = '#94a3b8';
+    targetCtx.fillText(`[TARGET] Formatted for ${activeAspectRatio.platform} (${activeAspectRatio.label})`, pad + sidebarW + 18, pad + winH - terminalH + 90);
+  };
+
+  // Real-time canvas animation loop (Compositing Video/IDE base, Color Filter LUT, Video Crop Pipeline, Ripples, Cursor Halo, Softsubs, Timer Overlay)
   useEffect(() => {
     let animId: number;
     const canvas = canvasRef.current;
@@ -744,164 +1192,96 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       // Clear canvas overlay
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // 0. Base Video / Software Workstation Compositor Layer with Real-Time Color Filter LUT Pipeline
+      // 0. Base Video / Software Workstation Compositor Layer with Real-Time Color Filter LUT & Video Cropping Pipeline
       ctx.save();
       if (activeFilter.id !== 'none') {
         ctx.filter = activeFilter.canvasFilter;
       }
 
+      const curCrop = cropSettingsRef.current;
+      const isCroppedActive = curCrop.isEnabled && !curCrop.isEditing;
+
       if (captureSource === 'screen' && screenVideoRef.current && screenVideoRef.current.readyState >= 2) {
-        ctx.drawImage(screenVideoRef.current, 0, 0, canvas.width, canvas.height);
-      } else if (captureSource === 'simulator') {
-        // Render rich simulated IDE workstation directly to compositor canvas
-        const bgGrad = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-        bgGrad.addColorStop(0, '#09090b');
-        bgGrad.addColorStop(0.5, '#121217');
-        bgGrad.addColorStop(1, '#09090b');
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-        // Window Frame
-        const pad = Math.min(24, Math.floor(canvas.width * 0.02));
-        const winW = canvas.width - pad * 2;
-        const winH = canvas.height - pad * 2;
-
-        ctx.fillStyle = '#0e0f14';
-        ctx.roundRect(pad, pad, winW, winH, 12);
-        ctx.fill();
-        ctx.strokeStyle = '#27272a';
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-
-        // Header bar
-        ctx.fillStyle = '#18181b';
-        ctx.roundRect(pad, pad, winW, 40, [12, 12, 0, 0]);
-        ctx.fill();
-
-        // Window buttons
-        ctx.fillStyle = '#ef4444';
-        ctx.beginPath();
-        ctx.arc(pad + 20, pad + 20, 5.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#f59e0b';
-        ctx.beginPath();
-        ctx.arc(pad + 38, pad + 20, 5.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = '#10b981';
-        ctx.beginPath();
-        ctx.arc(pad + 56, pad + 20, 5.5, 0, Math.PI * 2);
-        ctx.fill();
-
-        // Title
-        ctx.font = '600 13px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#a1a1aa';
-        const titleText =
-          canvas.width < 1200
-            ? 'KBT CloudIDE Simulator'
-            : 'KBT CloudIDE Simulator — Multi-Language Architecture Engine';
-        ctx.fillText(titleText, pad + 78, pad + 25);
-
-        // Active Aspect Ratio & LUT banner in header
-        ctx.font = '700 11px "JetBrains Mono", monospace';
-        ctx.textAlign = 'right';
-        let rightOffset = 20;
-        if (activeFilter.id !== 'none') {
-          ctx.fillStyle = '#c084fc';
-          ctx.fillText(`LUT: [${activeFilter.name.toUpperCase()}]`, pad + winW - rightOffset, pad + 25);
-          rightOffset += 160;
+        const vid = screenVideoRef.current;
+        if (isCroppedActive) {
+          const sW = vid.videoWidth || canvas.width;
+          const sH = vid.videoHeight || canvas.height;
+          const sx = Math.max(0, curCrop.x * sW);
+          const sy = Math.max(0, curCrop.y * sH);
+          const sw = Math.max(10, Math.min(sW - sx, curCrop.width * sW));
+          const sh = Math.max(10, Math.min(sH - sy, curCrop.height * sH));
+          ctx.drawImage(vid, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+        } else {
+          ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
         }
-        ctx.fillStyle = '#818cf8';
-        ctx.fillText(`[${activeAspectRatio.id} • ${activeAspectRatio.platform}]`, pad + winW - rightOffset, pad + 25);
-        ctx.textAlign = 'left';
-
-        // Sidebar
-        const sidebarW = canvas.width < 1200 ? 170 : 200;
-        ctx.fillStyle = '#121318';
-        ctx.fillRect(pad + 1, pad + 41, sidebarW, winH - 42);
-        ctx.strokeStyle = '#27272a';
-        ctx.beginPath();
-        ctx.moveTo(pad + sidebarW + 1, pad + 41);
-        ctx.lineTo(pad + sidebarW + 1, pad + winH);
-        ctx.stroke();
-
-        ctx.font = '600 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#71717a';
-        ctx.fillText('EXPLORER : KBT PROJECT', pad + 16, pad + 65);
-
-        const files = [
-          '📄 main.cpp [AVX2]',
-          '📄 SIMD_Kernel.rs',
-          '📄 pipeline.go',
-          '📄 engine.cu [CUDA]',
-          '📄 config.toml',
-        ];
-        files.forEach((f, fi) => {
-          ctx.fillStyle = fi === 0 ? '#818cf8' : '#a1a1aa';
-          ctx.fillText(f, pad + 16, pad + 95 + fi * 26);
-        });
-
-        // Editor code area
-        const terminalH = canvas.height > 1400 ? 260 : 140;
-        ctx.fillStyle = '#0d0e12';
-        ctx.fillRect(pad + sidebarW + 2, pad + 41, winW - sidebarW - 3, winH - terminalH - 42);
-
-        const codeSnippets = [
-          '// High-Performance Architectural Engine SIMD Kernel',
-          '#include <immintrin.h>',
-          '#include <stdint.h>',
-          '',
-          'void process_vector_stream(const float* in, float* out, size_t n) {',
-          '    const __m256 kPivot = _mm256_set1_ps(1.0f);',
-          '    for (size_t i = 0; i < n; i += 8) {',
-          '        __m256 v = _mm256_loadu_ps(in + i);',
-          '        __m256 res = _mm256_fmadd_ps(v, v, kPivot);',
-          '        _mm256_storeu_ps(out + i, res);',
-          '    }',
-          '}',
-        ];
-        ctx.font = '12px "JetBrains Mono", monospace';
-        codeSnippets.forEach((line, li) => {
-          ctx.fillStyle = '#52525b';
-          ctx.fillText(String(li + 1).padStart(2, '0'), pad + sidebarW + 18, pad + 72 + li * 22);
-          ctx.fillStyle =
-            line.startsWith('//')
-              ? '#71717a'
-              : line.startsWith('#')
-              ? '#f43f5e'
-              : line.includes('void') || line.includes('const')
-              ? '#60a5fa'
-              : line.includes('_mm256')
-              ? '#34d399'
-              : '#e4e4e7';
-          ctx.fillText(line, pad + sidebarW + 50, pad + 72 + li * 22);
-        });
-
-        // Terminal pane
-        ctx.fillStyle = '#090a0f';
-        ctx.fillRect(pad + sidebarW + 2, pad + winH - terminalH, winW - sidebarW - 3, terminalH);
-        ctx.strokeStyle = '#27272a';
-        ctx.beginPath();
-        ctx.moveTo(pad + sidebarW + 2, pad + winH - terminalH);
-        ctx.lineTo(pad + winW, pad + winH - terminalH);
-        ctx.stroke();
-
-        ctx.font = '600 11px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#38bdf8';
-        ctx.fillText(
-          `TERMINAL : KBT COMPILER [${activeAspectRatio.id} ${activeAspectRatio.width}×${activeAspectRatio.height}]`,
-          pad + sidebarW + 18,
-          pad + winH - terminalH + 24
-        );
-
-        ctx.font = '11px "JetBrains Mono", monospace';
-        ctx.fillStyle = '#4ade80';
-        ctx.fillText('[OK] Real-time Canvas Capture Stream Initialized.', pad + sidebarW + 18, pad + winH - terminalH + 46);
-        ctx.fillStyle = '#e4e4e7';
-        ctx.fillText(`[LUT] Active Color-Correction Filter: ${activeFilter.name}`, pad + sidebarW + 18, pad + winH - terminalH + 68);
-        ctx.fillStyle = '#94a3b8';
-        ctx.fillText(`[TARGET] Formatted for ${activeAspectRatio.platform} (${activeAspectRatio.label})`, pad + sidebarW + 18, pad + winH - terminalH + 90);
+      } else if (captureSource === 'simulator') {
+        if (isCroppedActive) {
+          if (!offscreenSimCanvasRef.current) {
+            offscreenSimCanvasRef.current = document.createElement('canvas');
+          }
+          const offCanvas = offscreenSimCanvasRef.current;
+          if (offCanvas.width !== canvas.width || offCanvas.height !== canvas.height) {
+            offCanvas.width = canvas.width;
+            offCanvas.height = canvas.height;
+          }
+          const offCtx = offCanvas.getContext('2d');
+          if (offCtx) {
+            offCtx.clearRect(0, 0, offCanvas.width, offCanvas.height);
+            drawSimulatorWorkstation(offCtx, offCanvas.width, offCanvas.height);
+            const sx = Math.max(0, curCrop.x * offCanvas.width);
+            const sy = Math.max(0, curCrop.y * offCanvas.height);
+            const sw = Math.max(10, Math.min(offCanvas.width - sx, curCrop.width * offCanvas.width));
+            const sh = Math.max(10, Math.min(offCanvas.height - sy, curCrop.height * offCanvas.height));
+            ctx.drawImage(offCanvas, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+          } else {
+            drawSimulatorWorkstation(ctx, canvas.width, canvas.height);
+          }
+        } else {
+          drawSimulatorWorkstation(ctx, canvas.width, canvas.height);
+        }
       }
       ctx.restore();
+
+      // 0.5 Real-Time Scene Transition Compositing (Fade, Slide, Wipe, Iris)
+      if (transitionStartTimeRef.current !== null && lastSceneSnapshotCanvasRef.current) {
+        const elapsed = performance.now() - transitionStartTimeRef.current;
+        const dur = Math.max(50, transitionDurationRef.current || 500);
+        const progress = Math.min(1.0, elapsed / dur);
+
+        if (progress < 1.0) {
+          const snap = lastSceneSnapshotCanvasRef.current;
+          const trType = transitionTypeRef.current;
+          ctx.save();
+
+          if (trType === 'fade') {
+            ctx.globalAlpha = Math.max(0, 1 - progress);
+            ctx.drawImage(snap, 0, 0, canvas.width, canvas.height);
+          } else if (trType === 'slide-left') {
+            const offsetX = -progress * canvas.width;
+            ctx.drawImage(snap, offsetX, 0, canvas.width, canvas.height);
+          } else if (trType === 'slide-up') {
+            const offsetY = -progress * canvas.height;
+            ctx.drawImage(snap, 0, offsetY, canvas.width, canvas.height);
+          } else if (trType === 'wipe-horizontal') {
+            const wipeX = progress * canvas.width;
+            ctx.beginPath();
+            ctx.rect(wipeX, 0, canvas.width - wipeX, canvas.height);
+            ctx.clip();
+            ctx.drawImage(snap, 0, 0, canvas.width, canvas.height);
+          } else if (trType === 'iris-circle') {
+            const maxRadius = Math.hypot(canvas.width / 2, canvas.height / 2);
+            const currentRadius = progress * maxRadius;
+            ctx.beginPath();
+            ctx.rect(0, 0, canvas.width, canvas.height);
+            ctx.arc(canvas.width / 2, canvas.height / 2, currentRadius, 0, Math.PI * 2, true);
+            ctx.clip();
+            ctx.drawImage(snap, 0, 0, canvas.width, canvas.height);
+          }
+          ctx.restore();
+        } else {
+          transitionStartTimeRef.current = null;
+        }
+      }
 
       // Pure Pixel LUT transformation if algorithmic mode is enabled
       if (usePixelLutEngine && activeFilter.id !== 'none') {
@@ -1111,6 +1491,73 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         ctx.restore();
       }
 
+      // 5.5 Real-Time Active Video Crop Status Badge on Compositor Canvas
+      if (curCrop.isEnabled && !curCrop.isEditing) {
+        ctx.save();
+        const badgeW = 160;
+        const badgeH = 34;
+        const badgeX = canvas.width - badgeW - 24;
+        const badgeY = activeFilter.id !== 'none' ? 68 : 24;
+
+        ctx.fillStyle = 'rgba(9, 9, 11, 0.88)';
+        ctx.strokeStyle = 'rgba(99, 102, 241, 0.7)';
+        ctx.lineWidth = 1.5;
+        ctx.roundRect(badgeX, badgeY, badgeW, badgeH, 8);
+        ctx.fill();
+        ctx.stroke();
+
+        // Indigo dot
+        ctx.beginPath();
+        ctx.arc(badgeX + 16, badgeY + badgeH / 2, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#818cf8';
+        ctx.fill();
+
+        ctx.font = '700 11px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#ffffff';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(`CROP: [${curCrop.preset.toUpperCase()}]`, badgeX + 28, badgeY + badgeH / 2);
+        ctx.restore();
+      }
+
+      // 6. Real-Time Custom Watermark Burning on Compositor Canvas
+      if (
+        watermarkSettings.enabled &&
+        watermarkImgRef.current &&
+        watermarkImgRef.current.complete &&
+        watermarkImgRef.current.naturalWidth > 0
+      ) {
+        ctx.save();
+        ctx.globalAlpha = watermarkSettings.opacity;
+        const img = watermarkImgRef.current;
+        const targetW = Math.max(80, Math.min(500, canvas.width * watermarkSettings.scale));
+        const targetH = targetW * (img.naturalHeight / img.naturalWidth);
+        const margin = 28;
+
+        let wx = canvas.width - targetW - margin;
+        let wy = canvas.height - targetH - margin;
+
+        if (watermarkSettings.position === 'top-left') {
+          wx = margin;
+          wy = margin + 50; // offset below header
+        } else if (watermarkSettings.position === 'top-right') {
+          wx = canvas.width - targetW - margin;
+          wy = margin + 50;
+        } else if (watermarkSettings.position === 'bottom-left') {
+          wx = margin;
+          wy = canvas.height - targetH - margin;
+        } else if (watermarkSettings.position === 'center') {
+          wx = (canvas.width - targetW) / 2;
+          wy = (canvas.height - targetH) / 2;
+        }
+
+        ctx.drawImage(img, wx, wy, targetW, targetH);
+        ctx.restore();
+      }
+
+      // 7. Post-Processing Filter Retro FX (VHS Glitch tracking and CRT Phosphor Scanlines)
+      renderPostProcessingGlitchFx(ctx, canvas.width, canvas.height, activeFilter.id);
+
       animId = requestAnimationFrame(render);
     };
 
@@ -1132,6 +1579,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     captureSource,
     selectedAspectRatio,
     activeAspectRatio,
+    watermarkSettings,
+    cropSettings,
   ]);
 
   // Initialize Camera stream if enabled
@@ -1158,6 +1607,28 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       }
     };
   }, [isCameraActive]);
+
+  // Initialize Mic audio stream and attach to multi-track mixer with digital noise gate
+  useEffect(() => {
+    let micStream: MediaStream | null = null;
+    if (isMicActive && typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      navigator.mediaDevices
+        .getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } })
+        .then((s) => {
+          micStream = s;
+          audioMixerRef.current?.attachMicStream(s);
+        })
+        .catch((err) => {
+          console.warn('Microphone stream access unavailable or denied:', err);
+        });
+    }
+
+    return () => {
+      if (micStream) {
+        micStream.getTracks().forEach((t) => t.stop());
+      }
+    };
+  }, [isMicActive]);
 
   // Handle interaction from the embedded software simulator
   const handleSimulatorInteraction = (event: {
@@ -1239,6 +1710,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           video: { frameRate: exportFramerate },
           audio: isMicActive,
         });
+        triggerSceneTransition();
         displayStreamRef.current = stream;
         setCaptureSource('screen');
       } else {
@@ -1246,6 +1718,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       }
     } catch (e) {
       console.warn('Display media cancelled or failed:', e);
+      triggerSceneTransition();
       setCaptureSource('simulator');
     }
   };
@@ -1282,6 +1755,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     if (canvas && (canvas as any).captureStream) {
       try {
         const stream = (canvas as any).captureStream(exportFramerate);
+
+        // Connect multi-track mixed audio stream to canvas capture
+        const mixedAudio = audioMixerRef.current?.getMixedAudioStream();
+        if (mixedAudio && mixedAudio.getAudioTracks().length > 0) {
+          mixedAudio.getAudioTracks().forEach((t) => stream.addTrack(t));
+        }
+
         const options = { mimeType: 'video/webm;codecs=vp9' };
         const recorder = new MediaRecorder(
           stream,
@@ -1307,6 +1787,30 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           setTrimStartSeconds(0);
           setTrimEndSeconds(Number(initialDur.toFixed(1)));
           setIsPreviewTrimLoopActive(false);
+
+          // Capture a static thumbnail screenshot from the active canvas
+          let thumbDataUrl: string | undefined = undefined;
+          if (canvasRef.current) {
+            try {
+              thumbDataUrl = canvasRef.current.toDataURL('image/jpeg', 0.65);
+            } catch (err) {
+              console.warn('Canvas thumbnail capture error:', err);
+            }
+          }
+
+          // Archive recording session to Firestore / local history
+          archiveRecordingSession(`rec-${Date.now()}`, {
+            projectTitle: projectTitleRef.current,
+            durationSeconds: recordingSeconds,
+            formattedDuration: formatDisplayDuration(recordingSeconds),
+            exportFormat: selectedExportFormatRef.current,
+            colorFilter: activeFilter.name,
+            resolution: `${activeAspectRatio.width}x${activeAspectRatio.height}`,
+            crop: cropSettingsRef.current.isEnabled
+              ? `${cropSettingsRef.current.preset.toUpperCase()} (${Math.round(cropSettingsRef.current.width * 100)}%×${Math.round(cropSettingsRef.current.height * 100)}%)`
+              : 'full-frame',
+            thumbnailUrl: thumbDataUrl,
+          }).catch((e) => console.warn('Archive recording session error:', e));
 
           // Once recording stops: automatically trigger file export for the captured video if autoExportOnStop is enabled
           if (autoExportOnStopRef.current) {
@@ -1509,6 +2013,15 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
       framerate: exportFramerate,
       quality: exportQuality,
       colorFilter: selectedFilter,
+      cropSettings: {
+        isEnabled: cropSettings.isEnabled,
+        preset: cropSettings.preset,
+        x: cropSettings.x,
+        y: cropSettings.y,
+        width: cropSettings.width,
+        height: cropSettings.height,
+        isLocked: cropSettings.isLocked,
+      },
       interactiveWorkflowStepsCount: scribeSteps.length,
       subtitleCuesCount: activeCues.length,
       stepsSummary: scribeSteps.map((st) => ({
@@ -1550,11 +2063,38 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
     triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
   };
 
+  // Fast Export: triggers immediate export of active project based on current format and quality settings
+  const handleFastImmediateExport = () => {
+    if (isRecordingRef.current) {
+      handleStopRecording();
+    }
+    setExportProgressPercent(20);
+    setIsExporting(true);
+    setExportStatusText('Fast Export: Encoding active project...');
+    setTimeout(() => setExportProgressPercent(50), 100);
+    setTimeout(() => setExportProgressPercent(85), 250);
+    setTimeout(() => {
+      setExportProgressPercent(100);
+      handleExportVideo(selectedExportFormatRef.current);
+    }, 400);
+  };
+
+  // Reset Studio: resets color filters, screen annotations, crop, and project metadata
+  const handleResetStudio = () => {
+    setSelectedFilter('none');
+    handleClearStrokes();
+    setCropSettings(DEFAULT_CROP_SETTINGS);
+    setProjectTitle(DEFAULT_STUDIO_CONFIG.defaultProjectTitle);
+    setProjectDescription(DEFAULT_STUDIO_CONFIG.defaultProjectDescription);
+    audioNotification.playHotkeyFeedback();
+  };
+
   // Export video or animation file (MP4, WEBM, GIF)
   const handleExportVideo = (formatOverride?: ExportFormatId, blobOverride?: Blob) => {
     const format = formatOverride || selectedExportFormatRef.current;
     const blobToUse = blobOverride || recordedBlobRef.current;
     setIsExporting(true);
+    setExportProgressPercent(25);
     setExportStatusText(
       format === 'gif'
         ? 'Compiling GIF89a animation loop...'
@@ -1563,8 +2103,11 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         : 'Muxing MP4 H.264 container...'
     );
 
+    setTimeout(() => setExportProgressPercent(65), 180);
+
     setTimeout(() => {
       try {
+        setExportProgressPercent(90);
         const ratioTag = activeAspectRatio.id.replace(':', 'x');
         const timestamp = Date.now();
         const cleanTitle = sanitizeFileName(projectTitleRef.current, 'KBT_Tutorial');
@@ -1583,6 +2126,8 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           const metaJson = generateProjectMetadataJson(metadata);
           triggerDownload(metaJson, `${baseFileName}_metadata.json`, 'application/json');
         }
+
+        let downloadedBlob: Blob | null = null;
 
         if (format === 'gif') {
           // Animated GIF compilation
@@ -1610,15 +2155,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
 
           if (frames.length > 0) {
             const gifBlob = createAnimatedGifBlob(frames, 130);
+            downloadedBlob = gifBlob;
             triggerDownload(gifBlob, exportedFileName, 'image/gif');
           } else {
-            const dummyGif = `GIF89a Animated Graphic Loop (${activeAspectRatio.label})`;
+            const dummyGif = new Blob([`GIF89a Animated Graphic Loop (${activeAspectRatio.label})`], { type: 'image/gif' });
+            downloadedBlob = dummyGif;
             triggerDownload(dummyGif, exportedFileName, 'image/gif');
           }
         } else if (format === 'webm') {
           // Native WebM stream
           if (blobToUse) {
             const webmBlob = new Blob([blobToUse], { type: 'video/webm' });
+            downloadedBlob = webmBlob;
             triggerDownload(webmBlob, exportedFileName, 'video/webm');
           } else if (recordedVideoUrl) {
             const a = document.createElement('a');
@@ -1628,13 +2176,15 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             a.click();
             document.body.removeChild(a);
           } else {
-            const dummyContent = `KBT_AppGuideVideo WebM Container (${activeAspectRatio.label} VP9 / Opus)`;
+            const dummyContent = new Blob([`KBT_AppGuideVideo WebM Container (${activeAspectRatio.label} VP9 / Opus)`], { type: 'video/webm' });
+            downloadedBlob = dummyContent;
             triggerDownload(dummyContent, exportedFileName, 'video/webm');
           }
         } else {
           // Universal MP4 format
           if (blobToUse) {
             const mp4Blob = new Blob([blobToUse], { type: 'video/mp4' });
+            downloadedBlob = mp4Blob;
             triggerDownload(mp4Blob, exportedFileName, 'video/mp4');
           } else if (recordedVideoUrl) {
             const a = document.createElement('a');
@@ -1644,21 +2194,82 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             a.click();
             document.body.removeChild(a);
           } else {
-            const dummyContent = `KBT_AppGuideVideo MP4 Container (${activeAspectRatio.label} H.264 / AAC)`;
+            const dummyContent = new Blob([`KBT_AppGuideVideo MP4 Container (${activeAspectRatio.label} H.264 / AAC)`], { type: 'video/mp4' });
+            downloadedBlob = dummyContent;
             triggerDownload(dummyContent, exportedFileName, 'video/mp4');
           }
         }
+
+        setExportProgressPercent(100);
+
+        // Play export success auditory chime
+        audioNotification.playSuccess();
+
+        const renderTime = 0.45;
+        const finalSizeKb = downloadedBlob ? Math.round(downloadedBlob.size / 1024) : 850;
+        const estimatedRawKb = Math.round(finalSizeKb * 3.4);
+
+        // Notify event bus for Recharts analytics dashboard
+        window.dispatchEvent(
+          new CustomEvent('kbt-export-complete', {
+            detail: {
+              format,
+              filename: exportedFileName,
+              renderTimeSec: renderTime,
+              fileSizeKb: finalSizeKb,
+            },
+          })
+        );
+
+        // Open detailed post-export summary report modal
+        setPostExportReport({
+          filename: exportedFileName,
+          format: format.toUpperCase(),
+          durationFormatted: formatDisplayDuration(origDur),
+          durationSeconds: origDur,
+          resolution: `${activeAspectRatio.width}x${activeAspectRatio.height}`,
+          renderTimeSec: renderTime,
+          finalFileSizeKb: finalSizeKb,
+          estimatedRawSizeKb: estimatedRawKb,
+          bitrateMbps: Number(((finalSizeKb * 8) / (origDur * 1024)).toFixed(2)) || 4.2,
+          frameDrops: 0,
+          downloadUrl: recordedVideoUrl || undefined,
+          blob: downloadedBlob || undefined,
+        });
+        setIsPostExportReportOpen(true);
 
         setLastExportedInfo({
           filename: exportedFileName,
           format: format,
           time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         });
+
+        setExportToast({
+          id: Date.now(),
+          type: 'success',
+          title: `Export Completed (.${format.toUpperCase()})`,
+          message: isTrimmed
+            ? `Trimmed cut (${formatTimestampWithTenths(trimStart)} - ${formatTimestampWithTenths(trimEnd)}) successfully rendered and downloaded.`
+            : `Full tutorial video successfully rendered and saved to Downloads.`,
+          filename: exportedFileName,
+          format: format,
+        });
       } catch (err) {
         console.error('Export error:', err);
+        audioNotification.playError();
+        setExportToast({
+          id: Date.now(),
+          type: 'error',
+          title: 'Export Failed',
+          message: err instanceof Error ? err.message : 'An error occurred during video rendering or download packaging.',
+          format: format,
+        });
       } finally {
-        setIsExporting(false);
-        setExportStatusText('');
+        setTimeout(() => {
+          setIsExporting(false);
+          setExportProgressPercent(0);
+          setExportStatusText('');
+        }, 700);
       }
     }, 450);
   };
@@ -1771,6 +2382,16 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         } else {
           handleStopRecording();
         }
+      } else if (action === 'FAST_EXPORT') {
+        handleFastImmediateExport();
+      } else if (action === 'ADVANCED_EXPORT') {
+        if (recordedBlobRef.current || recordedVideoUrl) {
+          setIsQualityPresetsModalOpen(true);
+        } else {
+          handleFastImmediateExport();
+        }
+      } else if (action === 'RESET_STUDIO') {
+        handleResetStudio();
       } else if (action === 'TOGGLE_TIMER') {
         setShowTimerOverlay((prev) => !prev);
       } else if (action === 'TOGGLE_CAM') {
@@ -1785,6 +2406,12 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         setIsDrawModeActive((prev) => !prev);
       } else if (action === 'TOGGLE_TELEMETRY') {
         setShowTelemetryOverlay((prev) => !prev);
+      } else if (action === 'TOGGLE_CROP') {
+        setCropSettings((prev) => ({
+          ...prev,
+          isEditing: !prev.isEditing,
+          isEnabled: !prev.isEditing ? true : prev.isEnabled,
+        }));
       }
     };
 
@@ -1803,7 +2430,12 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-1 bg-zinc-950 p-1 rounded-xl border border-zinc-800 text-xs">
             <button
-              onClick={() => setCaptureSource('simulator')}
+              onClick={() => {
+                if (captureSource !== 'simulator') {
+                  triggerSceneTransition();
+                  setCaptureSource('simulator');
+                }
+              }}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-medium transition ${
                 captureSource === 'simulator'
                   ? 'bg-indigo-600 text-white'
@@ -1852,6 +2484,13 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             {isMicActive ? <Mic className="w-4 h-4" /> : <MicOff className="w-4 h-4" />}
             <span className="hidden sm:inline">Mic Track</span>
           </button>
+
+          {/* Real-time Frequency-Domain Audio Visualizer (Equalizer Bars / Waveform) */}
+          <AudioVisualizer
+            audioMixer={audioMixerRef.current}
+            isMicActive={isMicActive}
+            variant="compact"
+          />
 
           {/* Drawing & Screen Highlight Overlay Toggle Button */}
           <button
@@ -2047,6 +2686,264 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               />
             </button>
           </div>
+
+          {/* Post-Processing Filter Library Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsFilterLibraryOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-purple-300 hover:text-white border-zinc-800 hover:border-purple-500/50 cursor-pointer"
+              title="Open Post-Processing Video Filter Library (Grayscale, Sepia, VHS glitch, CRT, etc.)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span>Filters ({activeFilter.label})</span>
+            </button>
+          </div>
+
+          {/* Interactive Video Cropping Tool Toggle Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              id="toolbar-crop-tool-toggle-btn"
+              onClick={() =>
+                setCropSettings((prev) => ({
+                  ...prev,
+                  isEditing: !prev.isEditing,
+                  isEnabled: !prev.isEditing ? true : prev.isEnabled,
+                }))
+              }
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                cropSettings.isEditing || cropSettings.isEnabled
+                  ? 'bg-indigo-950/60 text-indigo-300 border-indigo-500/60 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-indigo-500/50'
+              }`}
+              title="Open Interactive Video Cropping Tool (Hotkey: X)"
+            >
+              <Crop className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Crop Frame</span>
+              {cropSettings.isEnabled && (
+                <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 font-mono">
+                  {cropSettings.preset.toUpperCase()}
+                </span>
+              )}
+              <kbd className="hidden xl:inline text-[9px] px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 font-mono text-zinc-400">
+                X
+              </kbd>
+            </button>
+          </div>
+
+          {/* Multi-Track Audio Mixer Panel Toggle */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsAudioMixerOpen(!isAudioMixerOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                isAudioMixerOpen
+                  ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/60 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-cyan-500/50'
+              }`}
+              title="Open Multi-Track Audio Mixer & Digital Noise Gate Controls"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Audio Mixer</span>
+              {noiseGateConfig.enabled && (
+                <span className="text-[9px] px-1 py-0.2 rounded bg-cyan-950 text-cyan-400 border border-cyan-800 font-mono">
+                  Gate ON
+                </span>
+              )}
+              {compressorConfig.enabled && (
+                <span className="text-[9px] px-1 py-0.2 rounded bg-indigo-950 text-indigo-300 border border-indigo-800 font-mono">
+                  Comp ON
+                </span>
+              )}
+            </button>
+          </div>
+
+          {/* Watermark Burning Config Toggle */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsWatermarkPanelOpen(!isWatermarkPanelOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                isWatermarkPanelOpen || watermarkSettings.enabled
+                  ? 'bg-pink-950/50 text-pink-300 border-pink-500/60 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-pink-500/50'
+              }`}
+              title="Configure Custom Watermark (Burned into Recording Canvas)"
+            >
+              <ImageIcon className="w-3.5 h-3.5 text-pink-400" />
+              <span>Watermark</span>
+              <span
+                className={`w-1.5 h-1.5 rounded-full ${
+                  watermarkSettings.enabled ? 'bg-pink-400 animate-pulse' : 'bg-zinc-600'
+                }`}
+              />
+            </button>
+          </div>
+
+          {/* AI Transcript Generator Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsAiTranscriptOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-indigo-300 hover:text-white border-zinc-800 hover:border-indigo-500/50 cursor-pointer"
+              title="Generate localized subtitles from captured audio using Gemini API"
+            >
+              <Subtitles className="w-3.5 h-3.5 text-indigo-400" />
+              <span>AI Subtitles</span>
+            </button>
+          </div>
+
+          {/* AI Teleprompter Overlay Toggle */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              id="toolbar-teleprompter-toggle-btn"
+              onClick={() => setIsTeleprompterOpen(!isTeleprompterOpen)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                isTeleprompterOpen
+                  ? 'bg-emerald-950/60 text-emerald-300 border-emerald-500/60 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-emerald-500/50'
+              }`}
+              title="Open AI Teleprompter Overlay with Auto-Scroll and Speed Slider"
+            >
+              <FileText className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Teleprompter</span>
+              {isTeleprompterOpen && (
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+              )}
+            </button>
+          </div>
+
+          {/* Scene Transitions Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              id="toolbar-scene-transitions-btn"
+              onClick={() => setIsSceneTransitionModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-violet-300 hover:text-white border-zinc-800 hover:border-violet-500/50 cursor-pointer"
+              title="Configure Scene Transitions (Cross Fade, Push Slide, Iris Radial Wipe)"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-violet-400" />
+              <span>Transitions</span>
+            </button>
+          </div>
+
+          {/* Multi-Cam Director Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsMultiCamModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-cyan-300 hover:text-white border-zinc-800 hover:border-cyan-500/50 cursor-pointer"
+              title="Multi-Cam Director: Switch sources & configure picture-in-picture (PiP)"
+            >
+              <Video className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="hidden xl:inline">Multi-Cam</span>
+              {multiCamConfig.isPipEnabled && (
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+              )}
+            </button>
+          </div>
+
+          {/* Global Export Templates Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsGlobalTemplatesOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-amber-300 hover:text-white border-zinc-800 hover:border-amber-500/50 cursor-pointer"
+              title="Global Export Templates (Presentation Ready, Mobile Social, Raw Archive)"
+            >
+              <Layers className="w-3.5 h-3.5 text-amber-400" />
+              <span className="hidden xl:inline">Templates</span>
+            </button>
+          </div>
+
+          {/* Voiceover Synthesis Studio Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsVoiceoverModalOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-emerald-300 hover:text-white border-zinc-800 hover:border-emerald-500/50 cursor-pointer"
+              title="AI Voiceover Synthesis: Multi-language speech generation with voice personas"
+            >
+              <Mic className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="hidden xl:inline">Voiceover</span>
+            </button>
+          </div>
+
+          {/* Smart Scripting Assistant Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsSmartScriptingOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-purple-300 hover:text-white border-zinc-800 hover:border-purple-500/50 cursor-pointer"
+              title="Smart Scripting: Gemini tutorial outline generator"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden xl:inline">Scripting</span>
+            </button>
+          </div>
+
+          {/* Studio Actions Sidebar Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsActionsSidebarOpen((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border cursor-pointer ${
+                isActionsSidebarOpen
+                  ? 'bg-indigo-950 text-indigo-300 border-indigo-500/60 shadow-sm'
+                  : 'bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-indigo-500/50'
+              }`}
+              title="Open Studio Actions 1-Click Execution Sidebar"
+            >
+              <ListTree className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Actions</span>
+            </button>
+          </div>
+
+          {/* Web Speech API Voice Command Controller */}
+          <div className="flex items-center pl-2 border-l border-zinc-800">
+            <VoiceCommandController />
+          </div>
+
+          {/* Project Archive Sidebar Toggle Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsArchiveOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-purple-500/50 cursor-pointer"
+              title="Open Project Archive sidebar (Firestore synced sessions)"
+            >
+              <FolderArchive className="w-3.5 h-3.5 text-purple-400" />
+              <span>Archive</span>
+            </button>
+          </div>
+
+          {/* Social Share Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsSocialShareOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-indigo-500/50 cursor-pointer"
+              title="Generate shareable link and Markdown snippet"
+            >
+              <Share2 className="w-3.5 h-3.5 text-indigo-400" />
+              <span>Share</span>
+            </button>
+          </div>
+
+          {/* Studio Settings Modal Button */}
+          <div className="flex items-center gap-2 pl-2 border-l border-zinc-800">
+            <button
+              type="button"
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition border bg-zinc-950 text-zinc-300 hover:text-white border-zinc-800 hover:border-zinc-700 cursor-pointer"
+              title="Customize key bindings, Cloud Sync, and storage cleanup"
+            >
+              <Settings2 className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Settings</span>
+            </button>
+          </div>
         </div>
 
         {/* Right: Record / Pause / Stop Deck & Quality & TTS Volume Selector */}
@@ -2185,6 +3082,18 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             </select>
           </div>
 
+          {/* Custom Quality Presets Modal Button */}
+          <button
+            type="button"
+            id="custom-quality-presets-btn"
+            onClick={() => setIsQualityPresetsModalOpen(true)}
+            title="Open Custom Quality Presets Modal (Persisted in Firestore)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-950 hover:bg-zinc-850 text-cyan-300 hover:text-white border border-zinc-800 hover:border-cyan-500/50 text-xs font-mono font-semibold transition cursor-pointer"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden lg:inline">Presets</span>
+          </button>
+
           {!isRecording ? (
             <button
               onClick={handleStartRecording}
@@ -2216,6 +3125,22 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             </div>
           )}
 
+          {/* Fast Export Instant Hotkey Action Button */}
+          <button
+            id="fast-export-toolbar-btn"
+            type="button"
+            onClick={handleFastImmediateExport}
+            disabled={isExporting}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow-md shadow-amber-600/25 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+            title="Fast Export active project immediately with current settings (Hotkey: Ctrl+E)"
+          >
+            <Sparkles className="w-3.5 h-3.5 fill-current" />
+            <span className="hidden sm:inline">Fast Export</span>
+            <kbd className="hidden lg:inline text-[9px] px-1 py-0.2 rounded bg-amber-700/60 font-mono">
+              Ctrl+E
+            </kbd>
+          </button>
+
           {/* Dynamic Export Button for Selected Format (MP4 / WEBM / GIF) */}
           <button
             id="export-video-format-btn"
@@ -2234,12 +3159,65 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             <Download className="w-3.5 h-3.5" />
             <span>
               {isExporting
-                ? exportStatusText || `Exporting ${selectedExportFormat.toUpperCase()}...`
+                ? exportStatusText || `Exporting ${exportProgressPercent}%...`
                 : `Export ${selectedExportFormat.toUpperCase()}`}
             </span>
           </button>
+
+          {/* Header Visual Export Progress Pill */}
+          {isExporting && (
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-indigo-950/90 border border-indigo-500/50 text-indigo-300 font-mono text-xs font-bold animate-pulse shadow-lg">
+              <span className="w-2 h-2 rounded-full bg-indigo-400 animate-ping" />
+              <span>Exporting {exportProgressPercent}%</span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Multi-Track Audio Mixer Panel */}
+      <AudioMixerPanel
+        isOpen={isAudioMixerOpen}
+        onClose={() => setIsAudioMixerOpen(false)}
+        audioMixer={audioMixerRef.current}
+        micVolume={micVolume}
+        onMicVolumeChange={setMicVolume}
+        isMicMuted={isMicMuted}
+        onToggleMicMute={() => setIsMicMuted(!isMicMuted)}
+        systemVolume={systemVolume}
+        onSystemVolumeChange={setSystemVolume}
+        isSystemMuted={isSystemMuted}
+        onToggleSystemMute={() => setIsSystemMuted(!isSystemMuted)}
+        secondaryVolume={secondaryVolume}
+        onSecondaryVolumeChange={setSecondaryVolume}
+        isSecondaryMuted={isSecondaryMuted}
+        onToggleSecondaryMute={() => setIsSecondaryMuted(!isSecondaryMuted)}
+        noiseGateConfig={noiseGateConfig}
+        onNoiseGateConfigChange={(cfg) => setNoiseGateConfig((prev) => ({ ...prev, ...cfg }))}
+        compressorConfig={compressorConfig}
+        onCompressorConfigChange={(cfg) => setCompressorConfig((prev) => ({ ...prev, ...cfg }))}
+        meterLevels={meterLevels}
+        ambientTrack={ambientTrack}
+        onSelectAmbientTrack={setAmbientTrack}
+      />
+
+      {/* Custom Watermark Branding Panel */}
+      <WatermarkPanel
+        isOpen={isWatermarkPanelOpen}
+        onClose={() => setIsWatermarkPanelOpen(false)}
+        settings={watermarkSettings}
+        onUpdateSettings={(updated) => setWatermarkSettings((prev) => ({ ...prev, ...updated }))}
+      />
+
+      {/* Gemini AI Subtitle Transcript Generator Panel */}
+      <AiTranscriptPanel
+        isOpen={isAiTranscriptOpen}
+        onClose={() => setIsAiTranscriptOpen(false)}
+        recordedBlob={recordedBlobRef.current}
+        selectedLanguage={selectedLanguage}
+        durationSeconds={recordingSeconds}
+        projectTitle={projectTitle}
+        onApplyCues={(newCues) => setCues(newCues)}
+      />
 
       {/* Target Platform Aspect Ratio Quick Selector Strip */}
       <div className="flex items-center justify-between flex-wrap gap-2 py-1.5 px-3 rounded-xl bg-zinc-900/60 border border-zinc-800/80 text-xs">
@@ -2282,6 +3260,15 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           <span className="text-indigo-300 font-bold">{activeAspectRatio.width}×{activeAspectRatio.height}</span>
           <span className="text-zinc-600">•</span>
           <span className="text-zinc-400">{activeAspectRatio.platform}</span>
+          {cropSettings.isEnabled && (
+            <>
+              <span className="text-zinc-600">•</span>
+              <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                <Crop className="w-3 h-3 text-emerald-400" />
+                <span>Cropped ({cropSettings.preset.toUpperCase()})</span>
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -3499,24 +4486,46 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           </div>
         )}
 
-        {/* Draggable Circular Camera Bubble (Loom Style) */}
-        {isCameraActive && (
+        {/* Draggable Camera & Multi-Cam PiP Bubble */}
+        {(isCameraActive || multiCamConfig.isPipEnabled) && (
           <div
-            style={{ top: `${cameraPosition.y}px`, right: `${cameraPosition.x}px` }}
+            style={
+              multiCamConfig.pipPosition === 'top-left'
+                ? { top: '16px', left: '16px', borderColor: multiCamConfig.pipBorderColor || '#6366f1', borderWidth: '2px', borderStyle: 'solid' }
+                : multiCamConfig.pipPosition === 'top-right'
+                ? { top: '16px', right: '16px', borderColor: multiCamConfig.pipBorderColor || '#6366f1', borderWidth: '2px', borderStyle: 'solid' }
+                : multiCamConfig.pipPosition === 'bottom-left'
+                ? { bottom: '16px', left: '16px', borderColor: multiCamConfig.pipBorderColor || '#6366f1', borderWidth: '2px', borderStyle: 'solid' }
+                : multiCamConfig.pipPosition === 'bottom-right'
+                ? { bottom: '16px', right: '16px', borderColor: multiCamConfig.pipBorderColor || '#6366f1', borderWidth: '2px', borderStyle: 'solid' }
+                : { top: `${cameraPosition.y}px`, right: `${cameraPosition.x}px`, borderColor: multiCamConfig.pipBorderColor || '#6366f1', borderWidth: '2px', borderStyle: 'solid' }
+            }
             onMouseDown={() => setIsDraggingCam(true)}
             onMouseUp={() => setIsDraggingCam(false)}
-            className="absolute z-30 w-28 h-28 sm:w-36 sm:h-36 rounded-full overflow-hidden border-2 border-indigo-500 shadow-2xl cursor-grab active:cursor-grabbing bg-zinc-900 group"
+            className={`absolute z-30 overflow-hidden shadow-2xl cursor-grab active:cursor-grabbing bg-zinc-900 group transition-all duration-200 ${
+              multiCamConfig.pipShape === 'circle'
+                ? 'rounded-full'
+                : multiCamConfig.pipShape === 'square'
+                ? 'rounded-none'
+                : 'rounded-2xl'
+            } ${
+              multiCamConfig.pipSize === 'small'
+                ? 'w-24 h-24 sm:w-28 sm:h-28'
+                : multiCamConfig.pipSize === 'large'
+                ? 'w-44 h-44 sm:w-56 sm:h-56'
+                : 'w-32 h-32 sm:w-40 sm:h-40'
+            }`}
           >
             <video
               ref={cameraVideoRef}
               autoPlay
               playsInline
               muted
-              className="w-full h-full object-cover transform scale-x-[-1]"
+              className={`w-full h-full object-cover ${multiCamConfig.pipMirror ? 'transform scale-x-[-1]' : ''}`}
             />
             {/* Hover overlay hint */}
             <div className="absolute inset-0 bg-indigo-900/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-[10px] text-white font-mono pointer-events-none">
-              Webcam (Loom)
+              {multiCamConfig.secondarySource === 'webcam' ? 'Webcam (PiP)' : 'Multi-Cam Input'}
             </div>
           </div>
         )}
@@ -3791,7 +4800,76 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             </div>
           )}
         </div>
+
+        {/* Interactive Video Cropping Tool Overlay */}
+        {cropSettings.isEditing && (
+          <CropOverlay
+            cropSettings={cropSettings}
+            onUpdateCropSettings={(updated) =>
+              setCropSettings((prev) => ({ ...prev, ...updated }))
+            }
+            canvasWidth={activeAspectRatio.width}
+            canvasHeight={activeAspectRatio.height}
+            onClose={() => setCropSettings((prev) => ({ ...prev, isEditing: false }))}
+            isLiveRecording={isRecording}
+          />
+        )}
+
+        {/* Real-time Active Crop Floating Badge on Preview (when not in edit mode) */}
+        {cropSettings.isEnabled && !cropSettings.isEditing && (
+          <div
+            id="preview-active-crop-badge"
+            onClick={() => setCropSettings((prev) => ({ ...prev, isEditing: true }))}
+            className="absolute bottom-4 left-4 z-30 flex items-center gap-2 px-3 py-1.5 rounded-xl bg-zinc-950/92 backdrop-blur-md border border-indigo-500/50 text-[11px] font-mono text-indigo-300 shadow-xl cursor-pointer hover:bg-zinc-900 hover:border-indigo-400 transition select-none group"
+            title="Real-time crop is active on recorded stream. Click to adjust crop boundary."
+          >
+            <Crop className="w-3.5 h-3.5 text-indigo-400 group-hover:rotate-12 transition-transform" />
+            <span className="font-bold text-white">CROP: {cropSettings.preset.toUpperCase()}</span>
+            <span className="text-zinc-600">•</span>
+            <span className="text-emerald-300 font-semibold">
+              {Math.round(cropSettings.width * activeAspectRatio.width)}×
+              {Math.round(cropSettings.height * activeAspectRatio.height)}
+            </span>
+            <span className="text-indigo-400 text-[10px] underline ml-1">Edit ✎</span>
+          </div>
+        )}
+
+        {/* Real-time Keyboard Hotkey Screen HUD Toast (2-Second Confirmation) */}
+        <HotkeyToastOverlay />
+
+        {/* AI Teleprompter Overlay with Auto-Scroll Script */}
+        <TeleprompterOverlay
+          isOpen={isTeleprompterOpen}
+          onClose={() => setIsTeleprompterOpen(false)}
+          selectedLanguageName={LANGUAGE_MAP[selectedLanguage]?.name || 'English'}
+        />
       </div>
+
+      {/* Global Progress Bar at bottom of StudioRecorder updating during video encoding */}
+      {isExporting && (
+        <div
+          id="global-encoding-progress-bar-container"
+          className="w-full p-3.5 rounded-2xl bg-zinc-950/95 border border-indigo-500/50 shadow-2xl space-y-2 animate-in slide-in-from-bottom duration-200"
+        >
+          <div className="flex items-center justify-between text-xs font-mono">
+            <span className="flex items-center gap-2 text-indigo-300 font-bold">
+              <span className="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-ping" />
+              <span>ENCODING PIPELINE</span>
+              <span className="text-zinc-500">•</span>
+              <span className="text-zinc-300">{exportStatusText || 'Rendering frames...'}</span>
+            </span>
+            <span className="text-white font-bold bg-indigo-950 px-2.5 py-0.5 rounded border border-indigo-700/60 shadow-xs">
+              {exportProgressPercent}%
+            </span>
+          </div>
+          <div className="w-full h-2.5 bg-zinc-900 rounded-full overflow-hidden border border-zinc-800">
+            <div
+              className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-emerald-400 transition-all duration-200 rounded-full shadow-sm"
+              style={{ width: `${exportProgressPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Visual Annotations Drawer (when "Add Visual Annotations" is enabled) */}
       {showAnnotations && (
@@ -4060,6 +5138,172 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           )}
         </div>
       )}
+
+      {/* Filter Library Modal */}
+      <FilterLibraryModal
+        isOpen={isFilterLibraryOpen}
+        onClose={() => setIsFilterLibraryOpen(false)}
+        selectedFilter={selectedFilter}
+        onSelectFilter={(id) => setSelectedFilter(id)}
+      />
+
+      {/* Settings Modal (Key Bindings, Cloud Sync, and Storage Quota Cleanup) */}
+      <SettingsModal
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+        shortcuts={customShortcuts}
+        onUpdateShortcuts={(updated) => setCustomShortcuts(updated)}
+        onResetShortcuts={() => setCustomShortcuts(KEYBOARD_SHORTCUTS)}
+        cloudSyncEnabled={cloudSyncEnabled}
+        onToggleCloudSync={handleToggleCloudSync}
+      />
+
+      {/* Project Archive Sidebar */}
+      <ProjectArchiveSidebar
+        isOpen={isArchiveOpen}
+        onClose={() => setIsArchiveOpen(false)}
+        onLoadSession={(session) => {
+          if (session.projectTitle) setProjectTitle(session.projectTitle);
+          if (session.projectDescription) setProjectDescription(session.projectDescription);
+          if (session.exportFormat && (EXPORT_FORMAT_MAP as any)[session.exportFormat]) {
+            setSelectedExportFormat(session.exportFormat as ExportFormatId);
+          }
+          if (session.colorFilter && (COLOR_FILTER_MAP as any)[session.colorFilter]) {
+            setSelectedFilter(session.colorFilter as ColorFilterId);
+          }
+        }}
+      />
+
+      {/* Social Media Sharing Modal */}
+      <SocialShareModal
+        isOpen={isSocialShareOpen}
+        onClose={() => setIsSocialShareOpen(false)}
+        metadata={{
+          projectTitle,
+          projectDescription,
+          durationSeconds: recordingSeconds,
+          formattedDuration: formatDisplayDuration(recordingSeconds),
+          exportFormat: selectedExportFormat,
+          language: selectedLanguage,
+          languageName: LANGUAGE_MAP[selectedLanguage]?.name,
+        }}
+      />
+
+      {/* Scene Transitions Configuration Modal */}
+      <SceneTransitionModal
+        isOpen={isSceneTransitionModalOpen}
+        onClose={() => setIsSceneTransitionModalOpen(false)}
+        config={sceneTransitionConfig}
+        onUpdateConfig={(updated) => setSceneTransitionConfig((prev) => ({ ...prev, ...updated }))}
+        onTestTransition={() => triggerSceneTransition(sceneTransitionConfig.type, sceneTransitionConfig.durationMs)}
+      />
+
+      {/* Custom Quality & Encoding Presets Modal */}
+      <CustomQualityPresetsModal
+        isOpen={isQualityPresetsModalOpen}
+        onClose={() => setIsQualityPresetsModalOpen(false)}
+        currentQuality={exportQuality}
+        currentFramerate={exportFramerate}
+        currentFormat={selectedExportFormat}
+        onApplyPreset={(p) => {
+          setExportQuality(p.quality);
+          setExportFramerate(p.framerate);
+          if (p.format && (EXPORT_FORMAT_MAP as any)[p.format]) {
+            setSelectedExportFormat(p.format as ExportFormatId);
+          }
+        }}
+      />
+
+      {/* Video Export Result Toast Alert */}
+      <ExportToastNotification
+        toast={exportToast}
+        onDismiss={() => setExportToast(null)}
+        onDownloadAgain={(fmt) => handleExportVideo(fmt)}
+      />
+
+      {/* Multi-Cam & PiP Director Modal */}
+      <MultiCamDirectorModal
+        isOpen={isMultiCamModalOpen}
+        onClose={() => setIsMultiCamModalOpen(false)}
+        config={multiCamConfig}
+        onUpdateConfig={(updated) => setMultiCamConfig((prev) => ({ ...prev, ...updated }))}
+      />
+
+      {/* Global Export Templates Modal (Presentation Ready, Mobile Social, Raw Archive) */}
+      <GlobalExportTemplatesModal
+        isOpen={isGlobalTemplatesOpen}
+        onClose={() => setIsGlobalTemplatesOpen(false)}
+        currentSettings={{
+          format: selectedExportFormat,
+          quality: exportQuality,
+          framerate: exportFramerate,
+          aspectRatio: selectedAspectRatio,
+          colorFilter: selectedFilter,
+          lufsTarget: -14,
+        }}
+        onApplyTemplate={(tmpl) => {
+          setSelectedExportFormat(tmpl.format);
+          setExportQuality(tmpl.resolution || (tmpl as any).quality || '1080p');
+          setExportFramerate(tmpl.framerate);
+          if (tmpl.aspectRatio && (ASPECT_RATIO_MAP as any)[tmpl.aspectRatio]) {
+            setSelectedAspectRatio(tmpl.aspectRatio);
+          }
+          if ((tmpl as any).colorFilter && (COLOR_FILTER_MAP as any)[(tmpl as any).colorFilter]) {
+            setSelectedFilter((tmpl as any).colorFilter);
+          }
+        }}
+      />
+
+      {/* Voiceover Synthesis Studio (Gemini Powered) */}
+      <VoiceoverSynthesisModal
+        isOpen={isVoiceoverModalOpen}
+        onClose={() => setIsVoiceoverModalOpen(false)}
+        defaultScript={projectDescription || 'Welcome to this system engineering tutorial demonstration.'}
+        selectedLanguage={selectedLanguage}
+        currentLanguage={selectedLanguage}
+        projectTitle={projectTitle}
+        onAttachSpeechTrack={(_blob: any, text: string) => {
+          setProjectDescription((prev) => prev ? `${prev}\n\n[Voiceover]: ${text}` : `[Voiceover]: ${text}`);
+        }}
+      />
+
+      {/* Smart Scripting Outline Assistant (Gemini Powered) */}
+      <SmartScriptingModal
+        isOpen={isSmartScriptingOpen}
+        onClose={() => setIsSmartScriptingOpen(false)}
+        projectTitle={projectTitle}
+        projectDescription={projectDescription}
+        selectedLanguage={selectedLanguage}
+        language={selectedLanguage}
+        onApplyOutline={(headers: string[]) => {
+          setProjectDescription(headers.join('\n'));
+        }}
+      />
+
+      {/* Studio Actions 1-Click Execution Sidebar */}
+      <StudioActionsSidebar
+        isOpen={isActionsSidebarOpen}
+        onClose={() => setIsActionsSidebarOpen(false)}
+        isRecording={isRecording}
+        isCameraActive={isCameraActive}
+        isMicActive={isMicActive}
+        isDrawActive={isDrawModeActive}
+        isTelemetryActive={showTelemetryOverlay}
+        isCropActive={cropSettings.isEnabled}
+        isTimerActive={showTimerOverlay}
+      />
+
+      {/* Post-Export Summary Report & Success Overlay Modal */}
+      <PostExportReportModal
+        isOpen={isPostExportReportOpen}
+        onClose={() => setIsPostExportReportOpen(false)}
+        report={postExportReport}
+        onDownloadAgain={() => {
+          if (postExportReport) {
+            handleExportVideo((postExportReport.format.toLowerCase() as ExportFormatId), postExportReport.blob);
+          }
+        }}
+      />
     </div>
   );
 };

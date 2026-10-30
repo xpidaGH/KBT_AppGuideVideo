@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Video,
   Code2,
@@ -9,9 +9,16 @@ import {
   Languages,
   Mic,
   Activity,
+  Search,
+  Github,
+  CheckCircle2,
+  RefreshCw,
+  AlertCircle,
+  Settings,
 } from 'lucide-react';
 import { SupportedLanguageCode, LanguageInfo } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
+import { githubSyncService, GitHubSyncStatus } from '../services/githubSync';
 
 interface HeaderProps {
   currentTab: 'studio' | 'blueprints' | 'benchmarks';
@@ -21,6 +28,8 @@ interface HeaderProps {
   onOpenUserGuide: () => void;
   onOpenInstallGuide: () => void;
   onOpenArchitectureMap: () => void;
+  onOpenSearch?: () => void;
+  onOpenSettings?: () => void;
   isRecording: boolean;
   recordingSeconds: number;
   audioLevel: number; // 0 to 1
@@ -34,11 +43,41 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUserGuide,
   onOpenInstallGuide,
   onOpenArchitectureMap,
+  onOpenSearch,
+  onOpenSettings,
   isRecording,
   recordingSeconds,
   audioLevel,
 }) => {
   const currentLangInfo: LanguageInfo = LANGUAGE_MAP[selectedLanguage] || SUPPORTED_LANGUAGES[0];
+  const [hotkeyGlowPulse, setHotkeyGlowPulse] = useState<boolean>(false);
+  const [ghSyncStatus, setGhSyncStatus] = useState<GitHubSyncStatus>(() => githubSyncService.getStatus());
+
+  // Listen to 'kbt-hotkey' custom event for glowing pulse animation on recording timer
+  useEffect(() => {
+    let timeoutId: number;
+    const handleHotkeyEvent = () => {
+      setHotkeyGlowPulse(true);
+      window.clearTimeout(timeoutId);
+      timeoutId = window.setTimeout(() => {
+        setHotkeyGlowPulse(false);
+      }, 1000);
+    };
+
+    const handleGhSync = (e: any) => {
+      if (e.detail?.status) {
+        setGhSyncStatus(e.detail.status);
+      }
+    };
+
+    window.addEventListener('kbt-hotkey', handleHotkeyEvent);
+    window.addEventListener('kbt-github-sync', handleGhSync);
+    return () => {
+      window.removeEventListener('kbt-hotkey', handleHotkeyEvent);
+      window.removeEventListener('kbt-github-sync', handleGhSync);
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
 
   const formatTime = (secs: number) => {
     const m = Math.floor(secs / 60);
@@ -82,6 +121,38 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
+        {/* GitHub Sync Status Indicator Badge */}
+        <div
+          id="header-github-sync-status"
+          onClick={onOpenSettings}
+          title={`GitHub Sync Status: ${ghSyncStatus.toUpperCase()} (Click to configure in Settings)`}
+          className={`flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-mono font-bold transition cursor-pointer select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
+            ghSyncStatus === 'synced'
+              ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300 hover:bg-emerald-900/50'
+              : ghSyncStatus === 'syncing'
+              ? 'bg-amber-950/60 border-amber-500/50 text-amber-300 animate-pulse'
+              : 'bg-zinc-900/80 border-zinc-700 text-zinc-400 hover:text-zinc-200'
+          }`}
+        >
+          <Github className="w-3.5 h-3.5" />
+          {ghSyncStatus === 'synced' ? (
+            <>
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Synced</span>
+            </>
+          ) : ghSyncStatus === 'syncing' ? (
+            <>
+              <RefreshCw className="w-3.5 h-3.5 text-amber-400 animate-spin" />
+              <span>Syncing...</span>
+            </>
+          ) : (
+            <>
+              <span className="w-2 h-2 rounded-full bg-zinc-500" />
+              <span>Unsynced</span>
+            </>
+          )}
+        </div>
+
         {/* Prominent Visual Recording Indicator (Pulsing Red Dot, REC Badge & Live Timer) */}
         <div
           id="header-recording-indicator"
@@ -89,7 +160,9 @@ export const Header: React.FC<HeaderProps> = ({
           aria-live="polite"
           className={`flex items-center gap-2.5 px-3 py-1.5 rounded-full border transition-all duration-300 ${
             isRecording
-              ? 'bg-red-950/80 border-red-500/70 shadow-lg shadow-red-500/20 text-red-200 ring-1 ring-red-500/40'
+              ? hotkeyGlowPulse
+                ? 'bg-red-950 border-red-400 shadow-[0_0_35px_rgba(239,68,68,0.9)] ring-4 ring-red-500/80 animate-pulse scale-105 text-white'
+                : 'bg-red-950/80 border-red-500/70 shadow-lg shadow-red-500/20 text-red-200 ring-1 ring-red-500/40'
               : 'bg-zinc-900/70 border-zinc-800 text-zinc-500'
           }`}
           title={
@@ -100,23 +173,30 @@ export const Header: React.FC<HeaderProps> = ({
         >
           {isRecording ? (
             <>
-              {/* Concentric pulsing / blinking red dot */}
               <div className="relative flex items-center justify-center w-3 h-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-80"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 shadow-md shadow-red-500 animate-pulse"></span>
+                <span
+                  className={`relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500 shadow-md shadow-red-500 ${
+                    hotkeyGlowPulse ? 'scale-125 ring-2 ring-red-300' : 'animate-pulse'
+                  }`}
+                ></span>
               </div>
 
-              {/* Bold REC label & monospace elapsed timer */}
               <div className="flex items-center gap-1.5">
                 <span className="text-[11px] font-black tracking-widest text-red-400 uppercase font-mono">
                   REC
                 </span>
-                <span className="text-xs font-mono font-bold text-white tracking-wider">
+                <span
+                  className={`text-xs font-mono font-bold tracking-wider transition-all ${
+                    hotkeyGlowPulse
+                      ? 'text-red-100 drop-shadow-[0_0_8px_rgba(239,68,68,1)] scale-110 font-extrabold'
+                      : 'text-white'
+                  }`}
+                >
                   {formatTime(recordingSeconds)}
                 </span>
               </div>
 
-              {/* Live Audio Activity Bars during recording */}
               <div
                 className="hidden sm:flex items-center gap-0.5 pl-1.5 border-l border-red-500/30 h-3"
                 title={`Live Mic Audio Signal: ${Math.round(audioLevel * 100)}%`}
@@ -145,11 +225,11 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </div>
 
-        {/* Tab Navigation */}
+        {/* Tab Navigation with focus rings */}
         <div className="flex items-center gap-1 bg-zinc-900/90 p-1 rounded-xl border border-zinc-800">
           <button
             onClick={() => setCurrentTab('studio')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
               currentTab === 'studio'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
@@ -161,7 +241,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setCurrentTab('blueprints')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
               currentTab === 'blueprints'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
@@ -173,7 +253,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button
             onClick={() => setCurrentTab('benchmarks')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 ${
               currentTab === 'benchmarks'
                 ? 'bg-indigo-600 text-white shadow-sm'
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
@@ -184,9 +264,24 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Right Tools: Architecture Map, User Guide, Install Guide, Language Selector */}
+        {/* Right Tools: Global Search, Architecture Map, User Guide, Install Guide, Settings, Language Selector */}
         <div className="flex items-center gap-2">
-          {/* Live Mic VU meter indicator */}
+          {/* Global Search Button (Ctrl+K) */}
+          {onOpenSearch && (
+            <button
+              onClick={onOpenSearch}
+              title="Search documentation, blueprints, and recordings (Ctrl+K)"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer"
+            >
+              <Search className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden md:inline">Search</span>
+              <kbd className="hidden lg:inline px-1 rounded bg-zinc-950 border border-zinc-700 text-[9px] font-mono text-zinc-400">
+                ⌘K
+              </kbd>
+            </button>
+          )}
+
+          {/* Live Mic VU meter */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-800 text-xs text-zinc-400">
             <Mic className={`w-3.5 h-3.5 ${audioLevel > 0.1 ? 'text-emerald-400' : 'text-zinc-500'}`} />
             <div className="w-16 h-2 bg-zinc-800 rounded-full overflow-hidden flex">
@@ -200,7 +295,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenArchitectureMap}
             title="Unified Cross-Language Architecture Map"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium transition"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer"
           >
             <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden sm:inline">Architecture Map</span>
@@ -209,7 +304,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenInstallGuide}
             title="Download & Multi-Platform Native Installation Guide (INSTALLATION.md)"
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium transition"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white border border-zinc-800 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-emerald-400" />
             <span className="hidden sm:inline">Native Install</span>
@@ -218,7 +313,7 @@ export const Header: React.FC<HeaderProps> = ({
           <button
             onClick={onOpenUserGuide}
             title="Open 22-Language Software User Guide (USER_GUIDE.md)"
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 text-xs font-medium transition shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 hover:text-indigo-200 border border-indigo-500/40 text-xs font-medium transition shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer"
           >
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
             <span>User Guide</span>
@@ -226,7 +321,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* 22 Language Selector Dropdown */}
           <div className="relative group">
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-medium cursor-pointer hover:border-zinc-700 transition">
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-zinc-900 border border-zinc-800 text-zinc-300 text-xs font-medium cursor-pointer hover:border-zinc-700 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950">
               <Languages className="w-3.5 h-3.5 text-purple-400" />
               <span className="text-sm">{currentLangInfo.flag}</span>
               <span className="hidden md:inline font-mono text-[11px]">{currentLangInfo.code.toUpperCase()}</span>
@@ -236,7 +331,7 @@ export const Header: React.FC<HeaderProps> = ({
               value={selectedLanguage}
               onChange={(e) => onLanguageChange(e.target.value as SupportedLanguageCode)}
               aria-label="Select Internationalization Language"
-              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
             >
               {SUPPORTED_LANGUAGES.map((lang) => (
                 <option key={lang.code} value={lang.code} className="bg-zinc-900 text-zinc-100">

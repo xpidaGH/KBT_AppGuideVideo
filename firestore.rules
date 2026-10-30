@@ -1,0 +1,99 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation for Project
+    function isValidProject(data) {
+      return data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.projectTitle is string && data.projectTitle.size() > 0 && data.projectTitle.size() <= 200
+        && data.exportFormat is string && data.exportFormat.size() <= 20
+        && (!('projectDescription' in data) || (data.projectDescription is string && data.projectDescription.size() <= 1000))
+        && (!('durationSeconds' in data) || data.durationSeconds is number)
+        && (!('formattedDuration' in data) || (data.formattedDuration is string && data.formattedDuration.size() <= 30))
+        && (!('language' in data) || (data.language is string && data.language.size() <= 20))
+        && (!('aspectRatio' in data) || (data.aspectRatio is string && data.aspectRatio.size() <= 20))
+        && (!('colorFilter' in data) || (data.colorFilter is string && data.colorFilter.size() <= 50))
+        && (!('interactiveWorkflowStepsCount' in data) || data.interactiveWorkflowStepsCount is number)
+        && (!('subtitleCuesCount' in data) || data.subtitleCuesCount is number)
+        && (!('isAutoSaved' in data) || data.isAutoSaved is bool);
+    }
+
+    // Validation for SavedBlueprint
+    function isValidSavedBlueprint(data) {
+      return data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 200
+        && data.code is string && data.code.size() <= 50000
+        && (!('language' in data) || (data.language is string && data.language.size() <= 50))
+        && (!('pillarId' in data) || (data.pillarId is string && data.pillarId.size() <= 50))
+        && (!('filename' in data) || (data.filename is string && data.filename.size() <= 100));
+    }
+
+    // Validation for RecordingSession
+    function isValidRecordingSession(data) {
+      return data.userId is string && data.userId.size() <= 128 && data.userId == request.auth.uid
+        && data.projectTitle is string && data.projectTitle.size() > 0 && data.projectTitle.size() <= 200
+        && data.exportFormat is string && data.exportFormat.size() <= 20
+        && (!('durationSeconds' in data) || data.durationSeconds is number)
+        && (!('formattedDuration' in data) || (data.formattedDuration is string && data.formattedDuration.size() <= 30))
+        && (!('colorFilter' in data) || (data.colorFilter is string && data.colorFilter.size() <= 50))
+        && (!('resolution' in data) || (data.resolution is string && data.resolution.size() <= 50));
+    }
+
+    // Projects collection
+    match /projects/{projectId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(projectId) && isValidProject(incoming());
+      allow update: if isSignedIn() && isValidId(projectId) && isValidProject(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(projectId) && existing().userId == request.auth.uid;
+    }
+
+    // Saved Blueprints collection
+    match /savedBlueprints/{blueprintId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(blueprintId) && isValidSavedBlueprint(incoming());
+      allow update: if isSignedIn() && isValidId(blueprintId) && isValidSavedBlueprint(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(blueprintId) && existing().userId == request.auth.uid;
+    }
+
+    // Recording History Sessions collection
+    match /recordings/{recordingId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(recordingId) && isValidRecordingSession(incoming());
+      allow update: if isSignedIn() && isValidId(recordingId) && isValidRecordingSession(incoming()) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(recordingId) && existing().userId == request.auth.uid;
+    }
+
+    // Custom Quality Presets collection
+    match /qualityPresets/{presetId} {
+      allow get: if isSignedIn() && existing().userId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(presetId) && incoming().userId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(presetId) && incoming().userId == existing().userId;
+      allow delete: if isSignedIn() && isValidId(presetId) && existing().userId == request.auth.uid;
+    }
+  }
+}

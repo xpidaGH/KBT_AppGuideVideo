@@ -92,6 +92,28 @@ export const COLOR_FILTER_PRESETS: ColorFilterPreset[] = [
     previewGradient: 'from-violet-400 via-fuchsia-600 to-black',
     rgbBalance: { r: -1.0, g: -1.0, b: -1.0, contrast: 1.1 },
   },
+  {
+    id: 'vhs-glitch',
+    name: 'VHS Glitch (Retro Tape)',
+    label: 'VHS Glitch',
+    canvasFilter: 'contrast(125%) saturate(140%) brightness(105%)',
+    cssFilter: 'contrast(125%) saturate(140%) brightness(105%)',
+    description: 'Retro 80s analog magnetic tape tracking artifacts, RGB chromatic aberration, and noise jitter.',
+    badgeColor: 'bg-pink-950/60 text-pink-200 border-pink-500/70',
+    previewGradient: 'from-pink-500 via-purple-600 to-cyan-500',
+    rgbBalance: { r: 1.25, g: 0.95, b: 1.15, contrast: 1.25 },
+  },
+  {
+    id: 'crt-scanlines',
+    name: 'CRT Monitor (Arcade Scanlines)',
+    label: 'CRT Scanline',
+    canvasFilter: 'contrast(130%) brightness(110%) saturate(120%)',
+    cssFilter: 'contrast(130%) brightness(110%) saturate(120%)',
+    description: 'Phosphor arcade CRT monitor look with horizontal scanline raster and green phosphor bloom.',
+    badgeColor: 'bg-emerald-950/60 text-emerald-300 border-emerald-500/70',
+    previewGradient: 'from-emerald-400 via-zinc-800 to-black',
+    rgbBalance: { r: 0.9, g: 1.2, b: 0.9, contrast: 1.3 },
+  },
 ];
 
 export const COLOR_FILTER_MAP: Record<ColorFilterId, ColorFilterPreset> = COLOR_FILTER_PRESETS.reduce(
@@ -190,5 +212,87 @@ export function applyLutToImageData(imageData: ImageData, filterId: ColorFilterI
       }
       break;
     }
+    case 'vhs-glitch': {
+      // Chromatic aberration and RGB displacement
+      for (let i = 0; i < len; i += 4) {
+        // Red channel shift and high saturation
+        data[i] = Math.min(255, data[i] * 1.25);
+        data[i + 1] = Math.min(255, data[i + 1] * 0.95);
+        data[i + 2] = Math.min(255, data[i + 2] * 1.15);
+      }
+      break;
+    }
+    case 'crt-scanlines': {
+      // Green phosphor boost with contrast
+      for (let i = 0; i < len; i += 4) {
+        data[i] = Math.max(0, data[i] * 0.9);
+        data[i + 1] = Math.min(255, data[i + 1] * 1.2);
+        data[i + 2] = Math.max(0, data[i + 2] * 0.9);
+      }
+      break;
+    }
   }
 }
+
+/**
+ * Render dynamic retro overlays (VHS tape noise, tracking lines, CRT scanlines)
+ * directly into the compositor canvas so it bakes into the exported MP4/WebM/GIF.
+ */
+export function renderPostProcessingGlitchFx(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  filterId: ColorFilterId
+): void {
+  if (filterId === 'none') return;
+
+  if (filterId === 'vhs-glitch') {
+    ctx.save();
+    // 1. VHS tracking lines
+    const now = Date.now();
+    const trackingY = (now * 0.15) % height;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.fillRect(0, trackingY, width, 6);
+    ctx.fillStyle = 'rgba(236, 72, 153, 0.06)';
+    ctx.fillRect(0, (trackingY + 14) % height, width, 4);
+
+    // 2. Subtle horizontal scanline banding
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+    for (let y = 0; y < height; y += 4) {
+      ctx.fillRect(0, y, width, 1.5);
+    }
+
+    // 3. VHS PLAY OSD in top left corner
+    ctx.font = 'bold 22px "Courier New", monospace';
+    ctx.fillStyle = 'rgba(52, 211, 153, 0.85)';
+    ctx.fillText('PLAY ▶ 00:00:00', 36, 50);
+    ctx.font = '16px "Courier New", monospace';
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.75)';
+    ctx.fillText('SP 120min', 36, 75);
+
+    ctx.restore();
+  } else if (filterId === 'crt-scanlines') {
+    ctx.save();
+    // CRT dark scanlines every 3 pixels
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    for (let y = 0; y < height; y += 3) {
+      ctx.fillRect(0, y, width, 1.2);
+    }
+    // Phosphor glow vignette
+    const grad = ctx.createRadialGradient(
+      width / 2,
+      height / 2,
+      height * 0.4,
+      width / 2,
+      height / 2,
+      height * 0.85
+    );
+    grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+    grad.addColorStop(1, 'rgba(0, 20, 10, 0.45)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.restore();
+  }
+}
+

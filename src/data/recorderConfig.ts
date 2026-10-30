@@ -215,7 +215,13 @@ export interface KeyboardShortcutDef {
     | 'PREVIEW_TTS'
     | 'CYCLE_FILTER'
     | 'TOGGLE_DRAW'
-    | 'TOGGLE_TELEMETRY';
+    | 'TOGGLE_TELEMETRY'
+    | 'TOGGLE_CROP'
+    | 'FAST_EXPORT'
+    | 'ADVANCED_EXPORT'
+    | 'RESET_STUDIO';
+  requiresCtrl?: boolean;
+  requiresShift?: boolean;
 }
 
 export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
@@ -225,6 +231,14 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
     displayKey: 'Space',
     description: 'Start / Stop Recording',
     action: 'TOGGLE_RECORDING',
+  },
+  {
+    key: 'e',
+    code: 'KeyE',
+    displayKey: 'Ctrl+E',
+    description: 'Fast Immediate Export',
+    action: 'FAST_EXPORT',
+    requiresCtrl: true,
   },
   {
     key: 'd',
@@ -274,6 +288,30 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcutDef[] = [
     displayKey: 'G',
     description: 'Toggle GPU/CPU Telemetry',
     action: 'TOGGLE_TELEMETRY',
+  },
+  {
+    key: 'x',
+    code: 'KeyX',
+    displayKey: 'X',
+    description: 'Toggle Video Crop Tool',
+    action: 'TOGGLE_CROP',
+  },
+  {
+    key: 'r',
+    code: 'KeyR',
+    displayKey: 'Shift+R',
+    description: 'Reset Studio State',
+    action: 'RESET_STUDIO',
+    requiresShift: true,
+  },
+  {
+    key: 'e',
+    code: 'KeyE',
+    displayKey: 'Ctrl+Shift+E',
+    description: 'Advanced Export Modal',
+    action: 'ADVANCED_EXPORT',
+    requiresCtrl: true,
+    requiresShift: true,
   },
 ];
 
