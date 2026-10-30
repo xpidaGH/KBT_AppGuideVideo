@@ -8,6 +8,7 @@ import { InstallationModal } from './components/InstallationModal';
 import { ArchitectureMapModal } from './components/ArchitectureMapModal';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { SettingsModal } from './components/SettingsModal';
+import { BrandAssetsModal } from './components/BrandAssetsModal';
 import { SupportedLanguageCode } from './types';
 import { LANGUAGE_MAP, SUPPORTED_LANGUAGES } from './data/languages';
 import { KEYBOARD_SHORTCUTS, KeyboardShortcutDef } from './data/recorderConfig';
@@ -37,6 +38,7 @@ export default function App() {
   const [isUserGuideOpen, setIsUserGuideOpen] = useState<boolean>(false);
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState<boolean>(false);
   const [isArchitectureMapOpen, setIsArchitectureMapOpen] = useState<boolean>(false);
+  const [isBrandAssetsOpen, setIsBrandAssetsOpen] = useState<boolean>(false);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
@@ -204,6 +206,7 @@ export default function App() {
         onOpenUserGuide={() => setIsUserGuideOpen(true)}
         onOpenInstallGuide={() => setIsInstallGuideOpen(true)}
         onOpenArchitectureMap={() => setIsArchitectureMapOpen(true)}
+        onOpenBrandAssets={() => setIsBrandAssetsOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         isRecording={isRecording}
@@ -256,6 +259,15 @@ export default function App() {
                 >
                   <Download className="w-4 h-4 text-emerald-400" />
                   <span>Native Install Guide (Android, iOS, Windows, macOS)</span>
+                </button>
+
+                <button
+                  id="btn-splash-brand-assets"
+                  onClick={() => setIsBrandAssetsOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-lime-950/40 hover:bg-lime-900/50 text-lime-300 border border-lime-500/40 font-bold text-xs shadow-sm transition active:scale-95 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-500"
+                >
+                  <Sparkles className="w-4 h-4 text-lime-400" />
+                  <span>Brand & App Icons</span>
                 </button>
 
                 <button
@@ -455,6 +467,11 @@ export default function App() {
         onClose={() => setIsArchitectureMapOpen(false)}
       />
 
+      <BrandAssetsModal
+        isOpen={isBrandAssetsOpen}
+        onClose={() => setIsBrandAssetsOpen(false)}
+      />
+
       <GlobalSearchModal
         isOpen={isSearchOpen}
         onClose={() => setIsSearchOpen(false)}
@@ -462,6 +479,7 @@ export default function App() {
           if (docType === 'user-guide') setIsUserGuideOpen(true);
           else if (docType === 'installation') setIsInstallGuideOpen(true);
           else if (docType === 'architecture') setIsArchitectureMapOpen(true);
+          else if (docType === 'brand-assets') setIsBrandAssetsOpen(true);
         }}
       />
 

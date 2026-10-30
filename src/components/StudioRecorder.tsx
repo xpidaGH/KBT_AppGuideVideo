@@ -25,6 +25,7 @@ import {
   MousePointer,
   ExternalLink,
   Clock,
+  Hourglass,
   Layers,
   FileText,
   Share2,
@@ -148,6 +149,7 @@ import { SmartScriptingModal } from './SmartScriptingModal';
 import { StudioActionsSidebar } from './StudioActionsSidebar';
 import { audioNotification } from '../utils/audioNotification';
 import { GlobalExportTemplate } from '../data/structuredStudioData';
+import { VisualRecordingTimer } from './VisualRecordingTimer';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -256,6 +258,7 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
   const setShowClockOverlay = setShowTimerOverlay;
   const [showShortcutsOverlay, setShowShortcutsOverlay] = useState<boolean>(true);
   const [showTelemetryOverlay, setShowTelemetryOverlay] = useState<boolean>(true);
+  const [showVisualCountdownTimer, setShowVisualCountdownTimer] = useState<boolean>(true);
 
   // Video Aspect Ratio Pipeline (16:9 Landscape YouTube, 9:16 Portrait TikTok/Reels/Shorts, 1:1 Square Instagram, 4:3 Slides)
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<AspectRatioId>(() => {
@@ -2538,6 +2541,27 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
             />
           </label>
 
+          {/* Visual Countdown Timer Component Toggler */}
+          <button
+            type="button"
+            id="toolbar-countdown-timer-toggle-btn"
+            onClick={() => setShowVisualCountdownTimer((prev) => !prev)}
+            title="Toggle Visual Countdown & Elapsed Timer HUD inside the recorder"
+            className={`px-3 py-1.5 rounded-xl border text-xs flex items-center gap-1.5 transition cursor-pointer select-none ${
+              showVisualCountdownTimer
+                ? 'bg-red-950/40 text-red-300 border-red-800/60 shadow-sm'
+                : 'bg-zinc-950 text-zinc-500 border-zinc-800 hover:text-zinc-400'
+            }`}
+          >
+            <Hourglass className="w-3.5 h-3.5 text-red-400" />
+            <span className="hidden sm:inline font-medium">Countdown HUD</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                showVisualCountdownTimer ? 'bg-red-400 animate-pulse' : 'bg-zinc-600'
+              }`}
+            />
+          </button>
+
           {/* Shortcuts Overlay Toggle Button */}
           <button
             type="button"
@@ -4277,6 +4301,19 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {/* Visual Countdown Timer Component (displays inside the StudioRecorder during active recording) */}
+        {showVisualCountdownTimer && isRecording && (
+          <VisualRecordingTimer
+            isRecording={isRecording}
+            isPaused={isPaused}
+            recordingSeconds={recordingSeconds}
+            framerate={exportFramerate}
+            format={selectedExportFormat.toUpperCase()}
+            onPauseToggle={handlePauseRecording}
+            onStopRecording={handleStopRecording}
+          />
         )}
 
         {/* Persistent Duration Counter on Recording Canvas Area */}

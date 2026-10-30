@@ -27,7 +27,7 @@ interface GlobalSearchModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectBlueprint?: (blueprintId: string) => void;
-  onOpenDoc?: (docType: 'user-guide' | 'installation' | 'architecture') => void;
+  onOpenDoc?: (docType: 'user-guide' | 'installation' | 'architecture' | 'brand-assets') => void;
   onLoadArchiveSession?: (session: any) => void;
 }
 
@@ -94,6 +94,14 @@ export const GlobalSearchModal: React.FC<GlobalSearchModalProps> = ({
       subtitle: '5 Core Architectural Pillars from VRAM Compositor down to Mainframe telemetry.',
       badge: 'Architecture',
       actionPayload: 'architecture',
+    },
+    {
+      id: 'doc-brand-assets',
+      type: 'doc' as const,
+      title: 'KBT Brand Logo & Multi-Platform App Icons (Desktop, Mobile, Web)',
+      subtitle: 'Cyber-tech green/yellow spider icon for Desktop title bars, iOS/Android bars, and Web headers.',
+      badge: 'Brand Assets',
+      actionPayload: 'brand-assets',
     },
   ].filter(
     (d) =>

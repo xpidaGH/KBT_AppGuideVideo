@@ -15,6 +15,7 @@ import {
   RefreshCw,
   AlertCircle,
   Settings,
+  Sparkles,
 } from 'lucide-react';
 import { SupportedLanguageCode, LanguageInfo } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
@@ -28,6 +29,7 @@ interface HeaderProps {
   onOpenUserGuide: () => void;
   onOpenInstallGuide: () => void;
   onOpenArchitectureMap: () => void;
+  onOpenBrandAssets?: () => void;
   onOpenSearch?: () => void;
   onOpenSettings?: () => void;
   isRecording: boolean;
@@ -43,6 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenUserGuide,
   onOpenInstallGuide,
   onOpenArchitectureMap,
+  onOpenBrandAssets,
   onOpenSearch,
   onOpenSettings,
   isRecording,
@@ -96,8 +99,18 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
         {/* Brand & Tally Status */}
         <div className="flex items-center gap-3">
-          <div className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-lg shadow-indigo-500/20 border border-indigo-400/30">
-            <Video className="w-5 h-5 text-white" />
+          <div
+            onClick={onOpenBrandAssets}
+            role="button"
+            tabIndex={0}
+            title="KBT Brand Identity & Multi-Platform App Icons (Click to view icon suite)"
+            className="relative flex items-center justify-center w-10 h-10 rounded-xl bg-gradient-to-br from-zinc-900 to-black p-1 mask-squircle border border-yellow-400/30 shadow-md shadow-lime-500/10 cursor-pointer hover:border-lime-400 hover:scale-105 transition-all select-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-500"
+          >
+            <img
+              src="/assets/web-header-logo.png"
+              alt="KBT App Logo"
+              className="w-full h-full object-contain filter drop-shadow-[0_0_8px_rgba(163,230,53,0.5)]"
+            />
             {isRecording && (
               <span className="absolute -top-1 -right-1 flex h-4 w-4" title="Live Recording Active">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-80"></span>
@@ -108,10 +121,14 @@ export const Header: React.FC<HeaderProps> = ({
 
           <div>
             <div className="flex items-center gap-2">
-              <span className="font-extrabold text-base tracking-tight text-white font-mono">
-                KBT_AppGuideVideo
+              <span
+                onClick={onOpenBrandAssets}
+                className="font-extrabold text-base tracking-tight text-white font-mono flex items-center gap-1 cursor-pointer hover:text-lime-300 transition"
+              >
+                <span className="text-lime-400">KBT</span>
+                <span>_AppGuideVideo</span>
               </span>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 border border-zinc-700">
+              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded bg-zinc-800 text-lime-400 border border-lime-500/30">
                 v2.4
               </span>
             </div>
@@ -300,6 +317,17 @@ export const Header: React.FC<HeaderProps> = ({
             <GitBranch className="w-3.5 h-3.5 text-indigo-400" />
             <span className="hidden sm:inline">Architecture Map</span>
           </button>
+
+          {onOpenBrandAssets && (
+            <button
+              onClick={onOpenBrandAssets}
+              title="KBT Brand Logo & Multi-Platform App Icons (Desktop, Mobile, Web)"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-lime-950/40 hover:bg-lime-900/50 text-lime-300 hover:text-lime-200 border border-lime-500/30 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-lime-400" />
+              <span className="hidden sm:inline">Brand Icons</span>
+            </button>
+          )}
 
           <button
             onClick={onOpenInstallGuide}
