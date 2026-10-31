@@ -150,6 +150,7 @@ import { StudioActionsSidebar } from './StudioActionsSidebar';
 import { audioNotification } from '../utils/audioNotification';
 import { GlobalExportTemplate } from '../data/structuredStudioData';
 import { VisualRecordingTimer } from './VisualRecordingTimer';
+import { SystemPerformanceDashboard } from './SystemPerformanceDashboard';
 
 interface StudioRecorderProps {
   selectedLanguage: SupportedLanguageCode;
@@ -4907,6 +4908,14 @@ export const StudioRecorder: React.FC<StudioRecorderProps> = ({
           </div>
         </div>
       )}
+
+      {/* System Performance Telemetry Dashboard (GPU, CPU, Memory via Recharts) */}
+      <SystemPerformanceDashboard
+        isRecording={isRecording}
+        recordingSeconds={recordingSeconds}
+        framerate={exportFramerate}
+        aspectRatio={activeAspectRatio.label}
+      />
 
       {/* Visual Annotations Drawer (when "Add Visual Annotations" is enabled) */}
       {showAnnotations && (

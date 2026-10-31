@@ -16,6 +16,7 @@ import {
   AlertCircle,
   Settings,
   Sparkles,
+  Palette,
 } from 'lucide-react';
 import { SupportedLanguageCode, LanguageInfo } from '../types';
 import { SUPPORTED_LANGUAGES, LANGUAGE_MAP } from '../data/languages';
@@ -30,6 +31,7 @@ interface HeaderProps {
   onOpenInstallGuide: () => void;
   onOpenArchitectureMap: () => void;
   onOpenBrandAssets?: () => void;
+  onOpenThemeSettings?: () => void;
   onOpenSearch?: () => void;
   onOpenSettings?: () => void;
   isRecording: boolean;
@@ -46,6 +48,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenInstallGuide,
   onOpenArchitectureMap,
   onOpenBrandAssets,
+  onOpenThemeSettings,
   onOpenSearch,
   onOpenSettings,
   isRecording,
@@ -346,6 +349,18 @@ export const Header: React.FC<HeaderProps> = ({
             <BookOpen className="w-3.5 h-3.5 text-indigo-400" />
             <span>User Guide</span>
           </button>
+
+          {/* Theme Settings Button (5 UI Themes) */}
+          {onOpenThemeSettings && (
+            <button
+              onClick={onOpenThemeSettings}
+              title="Theme Settings — Select from 5 distinct UI theme variations"
+              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 hover:text-white border border-purple-500/30 text-xs font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-500 focus-visible:ring-offset-2 focus-visible:ring-offset-zinc-950 cursor-pointer shadow-xs"
+            >
+              <Palette className="w-3.5 h-3.5 text-purple-400" />
+              <span className="hidden sm:inline">Theme Settings</span>
+            </button>
+          )}
 
           {/* 22 Language Selector Dropdown */}
           <div className="relative group">

@@ -1,5 +1,133 @@
 @import "tailwindcss";
 
+:root {
+  --app-bg: #09090b;
+  --app-surface: #18181b;
+  --app-surface-subtle: #27272a;
+  --app-border: #27272a;
+  --app-text-primary: #ffffff;
+  --app-text-secondary: #a1a1aa;
+  --app-accent: #6366f1;
+  --app-accent-glow: rgba(99, 102, 241, 0.35);
+  --app-radius: 14px;
+  --app-font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+body {
+  font-family: var(--app-font-family);
+  background-color: var(--app-bg);
+  color: var(--app-text-primary);
+  transition: background-color 0.25s ease, color 0.25s ease;
+}
+
+/* Theme 1: Editorial & Refined */
+[data-theme="editorial"] {
+  --app-bg: #fbfbfa;
+  --app-surface: #ffffff;
+  --app-surface-subtle: #f5f4ef;
+  --app-border: #e4e2d8;
+  --app-text-primary: #1c1917;
+  --app-text-secondary: #57534e;
+  --app-accent: #991b1b;
+  --app-accent-glow: rgba(153, 27, 27, 0.2);
+  --app-radius: 12px;
+  --app-font-family: 'Lora', 'Playfair Display', Georgia, serif;
+}
+
+[data-theme="editorial"] .bg-zinc-950,
+[data-theme="editorial"] .bg-black {
+  background-color: #fbfbfa !important;
+  color: #1c1917 !important;
+}
+
+[data-theme="editorial"] .bg-zinc-900 {
+  background-color: #ffffff !important;
+  border-color: #e4e2d8 !important;
+}
+
+[data-theme="editorial"] .text-white {
+  color: #1c1917 !important;
+}
+
+[data-theme="editorial"] .text-zinc-400,
+[data-theme="editorial"] .text-zinc-500 {
+  color: #78716c !important;
+}
+
+[data-theme="editorial"] .border-zinc-800 {
+  border-color: #e4e2d8 !important;
+}
+
+/* Theme 2: Technical & Systematic */
+[data-theme="technical"] {
+  --app-bg: #09090b;
+  --app-surface: #121215;
+  --app-surface-subtle: #18181b;
+  --app-border: #27272a;
+  --app-text-primary: #f4f4f5;
+  --app-text-secondary: #a1a1aa;
+  --app-accent: #a3e635;
+  --app-accent-glow: rgba(163, 230, 53, 0.35);
+  --app-radius: 4px;
+  --app-font-family: 'JetBrains Mono', 'Fira Code', monospace;
+}
+
+[data-theme="technical"] * {
+  border-radius: var(--app-radius) !important;
+}
+
+/* Theme 3: Warm & Approachable */
+[data-theme="warm"] {
+  --app-bg: #faf7f2;
+  --app-surface: #ffffff;
+  --app-surface-subtle: #f5ede2;
+  --app-border: #e8dfd5;
+  --app-text-primary: #334155;
+  --app-text-secondary: #64748b;
+  --app-accent: #ea580c;
+  --app-accent-glow: rgba(234, 88, 12, 0.25);
+  --app-radius: 20px;
+  --app-font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
+[data-theme="warm"] .bg-zinc-950,
+[data-theme="warm"] .bg-black {
+  background-color: #faf7f2 !important;
+  color: #334155 !important;
+}
+
+[data-theme="warm"] .bg-zinc-900 {
+  background-color: #ffffff !important;
+  border-color: #e8dfd5 !important;
+}
+
+[data-theme="warm"] .text-white {
+  color: #1e293b !important;
+}
+
+[data-theme="warm"] .text-zinc-400,
+[data-theme="warm"] .text-zinc-500 {
+  color: #64748b !important;
+}
+
+[data-theme="warm"] .border-zinc-800 {
+  border-color: #e8dfd5 !important;
+}
+
+/* Theme 5: Vibrant Palette */
+[data-theme="vibrant"] {
+  --app-bg: #0b0f19;
+  --app-surface: #131b2e;
+  --app-surface-subtle: #1e293b;
+  --app-border: #312e81;
+  --app-text-primary: #ffffff;
+  --app-text-secondary: #cbd5e1;
+  --app-accent: #d946ef;
+  --app-accent-glow: rgba(217, 70, 239, 0.4);
+  --app-radius: 16px;
+  --app-font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+
 @layer utilities {
   .mask-squircle {
     mask-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path fill="black" d="M 0,50 C 0,4 4,0 50,0 C 96,0 100,4 100,50 C 100,96 96,100 50,100 C 4,100 0,96 0,50 Z"/></svg>');
@@ -10,3 +138,4 @@
     -webkit-mask-repeat: no-repeat;
   }
 }
+

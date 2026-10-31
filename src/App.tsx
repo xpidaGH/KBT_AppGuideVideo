@@ -9,6 +9,8 @@ import { ArchitectureMapModal } from './components/ArchitectureMapModal';
 import { GlobalSearchModal } from './components/GlobalSearchModal';
 import { SettingsModal } from './components/SettingsModal';
 import { BrandAssetsModal } from './components/BrandAssetsModal';
+import { ThemeSettingsModal } from './components/ThemeSettingsModal';
+import { getSavedTheme, applyTheme } from './utils/themeManager';
 import { SupportedLanguageCode } from './types';
 import { LANGUAGE_MAP, SUPPORTED_LANGUAGES } from './data/languages';
 import { KEYBOARD_SHORTCUTS, KeyboardShortcutDef } from './data/recorderConfig';
@@ -28,6 +30,7 @@ import {
   XCircle,
   Activity,
   Sliders,
+  Palette,
 } from 'lucide-react';
 
 export default function App() {
@@ -39,6 +42,7 @@ export default function App() {
   const [isInstallGuideOpen, setIsInstallGuideOpen] = useState<boolean>(false);
   const [isArchitectureMapOpen, setIsArchitectureMapOpen] = useState<boolean>(false);
   const [isBrandAssetsOpen, setIsBrandAssetsOpen] = useState<boolean>(false);
+  const [isThemeSettingsOpen, setIsThemeSettingsOpen] = useState<boolean>(false);
   const [isSearchOpen, setIsSearchOpen] = useState<boolean>(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
 
@@ -76,14 +80,10 @@ export default function App() {
     success: boolean;
   } | null>(null);
 
-  // Initialize theme class
+  // Initialize active UI theme variation and CSS variables
   useEffect(() => {
-    const stored = localStorage.getItem('kbt_theme_v1');
-    if (stored === 'light') {
-      document.documentElement.classList.remove('dark');
-    } else {
-      document.documentElement.classList.add('dark');
-    }
+    const saved = getSavedTheme();
+    applyTheme(saved);
   }, []);
 
   // Global Keyboard Listener in App component
@@ -207,6 +207,7 @@ export default function App() {
         onOpenInstallGuide={() => setIsInstallGuideOpen(true)}
         onOpenArchitectureMap={() => setIsArchitectureMapOpen(true)}
         onOpenBrandAssets={() => setIsBrandAssetsOpen(true)}
+        onOpenThemeSettings={() => setIsThemeSettingsOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
         isRecording={isRecording}
@@ -470,6 +471,11 @@ export default function App() {
       <BrandAssetsModal
         isOpen={isBrandAssetsOpen}
         onClose={() => setIsBrandAssetsOpen(false)}
+      />
+
+      <ThemeSettingsModal
+        isOpen={isThemeSettingsOpen}
+        onClose={() => setIsThemeSettingsOpen(false)}
       />
 
       <GlobalSearchModal

@@ -34,6 +34,7 @@ import {
   GitHubRepoItem,
   GitHubTreeNode,
 } from '../services/githubSync';
+import { THEME_LIST, ThemeId, getSavedTheme, applyTheme } from '../utils/themeManager';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -73,14 +74,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [isLoadingVcs, setIsLoadingVcs] = useState<boolean>(false);
   const [vcsFeedback, setVcsFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
-  // Theme State
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('kbt_theme_v1');
-      if (stored === 'light') return 'light';
-    }
-    return 'dark';
-  });
+  // Theme State (5 distinct variations)
+  const [currentThemeId, setCurrentThemeId] = useState<ThemeId>(() => getSavedTheme());
+
+  useEffect(() => {
+    const handleSync = (e: Event) => {
+      const customEvent = e as CustomEvent<{ theme: ThemeId }>;
+      if (customEvent.detail?.theme) {
+        setCurrentThemeId(customEvent.detail.theme);
+      }
+    };
+    window.addEventListener('kbt-theme-change', handleSync);
+    return () => window.removeEventListener('kbt-theme-change', handleSync);
+  }, []);
 
   useEffect(() => {
     if (isOpen) {
@@ -173,16 +179,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setTimeout(() => setCleanupFeedback(null), 4000);
   };
 
-  const handleToggleTheme = (newTheme: 'dark' | 'light') => {
-    setTheme(newTheme);
-    if (typeof document !== 'undefined') {
-      if (newTheme === 'dark') {
-        document.documentElement.classList.add('dark');
-      } else {
-        document.documentElement.classList.remove('dark');
-      }
-      localStorage.setItem('kbt_theme_v1', newTheme);
-    }
+  const handleSelectTheme = (themeId: ThemeId) => {
+    setCurrentThemeId(themeId);
+    applyTheme(themeId);
   };
 
   const handleGitHubLoginPopup = async () => {
@@ -673,56 +672,67 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* TAB 4: Appearance / Global Theme */}
           {activeTab === 'appearance' && (
             <div className="space-y-4">
-              <div className="p-4 rounded-2xl bg-zinc-950/70 border border-zinc-800 space-y-4">
-                <div className="space-y-1">
-                  <span className="text-sm font-bold text-white">Application Color Theme</span>
-                  <p className="text-xs text-zinc-400">
-                    Switch between dark and light UI themes for the entire application interface.
-                  </p>
+              <div className="p-5 rounded-2xl bg-zinc-950/70 border border-zinc-800 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="text-sm font-bold text-white flex items-center gap-2">
+                      <Sparkles className="w-4 h-4 text-indigo-400" />
+                      UI Theme Variations (5 Tailored Aesthetics)
+                    </span>
+                    <p className="text-xs text-zinc-400">
+                      Instantly updates typography, colors, border styling, and CSS variables across all app views. Choices persist in localStorage.
+                    </p>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleTheme('dark')}
-                    className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
-                      theme === 'dark'
-                        ? 'bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500/30 text-white'
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-zinc-950 text-indigo-400 border border-zinc-800">
-                        <Moon className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-white text-xs">Dark Studio Theme</div>
-                        <div className="text-[10px] text-zinc-400">High contrast for video editing</div>
-                      </div>
-                    </div>
-                    {theme === 'dark' && <Check className="w-4 h-4 text-emerald-400" />}
-                  </button>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                  {THEME_LIST.map((t) => {
+                    const isSelected = currentThemeId === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => handleSelectTheme(t.id)}
+                        className={`p-4 rounded-2xl border text-left transition cursor-pointer flex flex-col justify-between gap-3 relative group ${
+                          isSelected
+                            ? 'bg-indigo-950/40 border-indigo-500 ring-2 ring-indigo-500/40 text-white shadow-lg shadow-indigo-950/50'
+                            : 'bg-zinc-900/80 border-zinc-800 text-zinc-300 hover:border-zinc-700 hover:bg-zinc-900'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white text-xs tracking-tight">{t.name}</span>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-400 font-mono">
+                                {t.typography.label}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-zinc-400 mt-1 line-clamp-2">
+                              {t.tagline}
+                            </div>
+                          </div>
+                          {isSelected && (
+                            <span className="p-1 rounded-full bg-indigo-500 text-white shrink-0">
+                              <Check className="w-3.5 h-3.5" />
+                            </span>
+                          )}
+                        </div>
 
-                  <button
-                    type="button"
-                    onClick={() => handleToggleTheme('light')}
-                    className={`p-4 rounded-2xl border text-left transition cursor-pointer flex items-center justify-between ${
-                      theme === 'light'
-                        ? 'bg-indigo-950/60 border-indigo-500 ring-2 ring-indigo-500/30 text-white'
-                        : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 rounded-xl bg-zinc-950 text-amber-400 border border-zinc-800">
-                        <Sun className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-white text-xs">Light Theme</div>
-                        <div className="text-[10px] text-zinc-400">Clean daytime brightness</div>
-                      </div>
-                    </div>
-                    {theme === 'light' && <Check className="w-4 h-4 text-emerald-400" />}
-                  </button>
+                        <div className="flex items-center justify-between pt-1 border-t border-zinc-800/60">
+                          <span className="text-[10px] text-zinc-500 font-mono">{t.typography.density}</span>
+                          <div className="flex items-center gap-1.5">
+                            {t.previewColors.map((color, idx) => (
+                              <span
+                                key={idx}
+                                className="w-3 h-3 rounded-full border border-black/30 shadow-xs"
+                                style={{ backgroundColor: color }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
